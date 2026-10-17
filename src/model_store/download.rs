@@ -52,9 +52,9 @@ where
             on_progress(Progress { received, total });
             continue;
         }
-        received += download_file(entry, file, &dest, &mut |delta| {
+        received += download_file(entry, file, &dest, &mut |file_received| {
             on_progress(Progress {
-                received: received + delta,
+                received: received + file_received,
                 total,
             })
         })?;
@@ -64,7 +64,8 @@ where
 }
 
 /// Downloads a single file to `dest`, verifying its SHA-256 when `file.sha256`
-/// is present. The `on_chunk` callback receives the number of new bytes.
+/// is present. The `on_chunk` callback receives the cumulative bytes written so
+/// far for this file.
 fn download_file<F>(
     entry: &ModelEntry,
     file: &ModelFile,
@@ -97,7 +98,7 @@ where
         out.write_all(&buf[..n])
             .map_err(|e| format!("write: {e}"))?;
         written += n as u64;
-        on_chunk(n as u64);
+        on_chunk(written);
     }
     out.flush().map_err(|e| format!("flush: {e}"))?;
 

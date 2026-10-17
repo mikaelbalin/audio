@@ -8,6 +8,6 @@ pub mod catalog;
 pub mod download;
 pub mod paths;
 
-pub use catalog::{ModelEntry, ModelFile, all_models, file_url, find};
+pub use catalog::{ModelEntry, ModelFile, ModelStatus, all_models, all_statuses, file_url, find};
 pub use download::{Progress, delete_model, download_model};
 pub use paths::{model_dir, models_dir};

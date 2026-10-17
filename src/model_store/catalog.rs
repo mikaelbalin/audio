@@ -38,6 +38,32 @@ impl ModelEntry {
     pub fn total_size(&self) -> u64 {
         self.files.iter().map(|f| f.size).sum()
     }
+
+    /// Whether every file of this model is present on disk.
+    pub fn is_downloaded(&self) -> bool {
+        self.files
+            .iter()
+            .all(|f| super::paths::model_dir(&self.id).join(&f.name).exists())
+    }
+}
+
+/// A model together with its on-disk download status, serialized for the UI.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelStatus {
+    #[serde(flatten)]
+    pub entry: ModelEntry,
+    pub is_downloaded: bool,
+}
+
+impl ModelStatus {
+    pub fn of(entry: ModelEntry) -> Self {
+        let is_downloaded = entry.is_downloaded();
+        Self {
+            entry,
+            is_downloaded,
+        }
+    }
 }
 
 /// Resolves a file to its Hugging Face `resolve` URL.
@@ -95,6 +121,11 @@ pub fn all_models() -> Vec<ModelEntry> {
 /// Looks up a model by id.
 pub fn find(id: &str) -> Option<ModelEntry> {
     all_models().into_iter().find(|m| m.id == id)
+}
+
+/// All models, each annotated with its on-disk download status.
+pub fn all_statuses() -> Vec<ModelStatus> {
+    all_models().into_iter().map(ModelStatus::of).collect()
 }
 
 #[cfg(test)]
