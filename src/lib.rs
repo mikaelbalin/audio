@@ -1,14 +1,12 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
+//! `audio` — unified audio capture and transcription layer.
+//!
+//! This crate is the single source of truth for audio work across
+//! `speech-transcription` and `chatbot`. It is organized into small,
+//! focused modules:
+//!
+//! - [`protocol`] — shared event/command types (the contract).
+//! - capture, providers, session, tauri — added incrementally as the
+//!   crate grows.
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
-}
+pub mod capture;
+pub mod protocol;
