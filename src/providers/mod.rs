@@ -15,7 +15,7 @@ mod mistral;
 
 pub use local::LocalProvider;
 // Re-export so `providers::MistralConfig` keeps working for providers.
-pub use crate::protocol::MistralConfig;
+pub use crate::protocol::{LocalConfig, MistralConfig};
 pub use mistral::MistralProvider;
 
 /// Configuration common to every provider.
@@ -72,7 +72,7 @@ pub fn build(
 ) -> Result<Box<dyn TranscriptionProvider>, String> {
     match kind {
         ProviderKind::Mistral => Ok(Box::new(MistralProvider::new(cfg.mistral))),
-        ProviderKind::Local => Err("local provider: not yet implemented".to_string()),
+        ProviderKind::Local => Ok(Box::new(LocalProvider::new(cfg.local))),
     }
 }
 
@@ -80,6 +80,7 @@ pub fn build(
 #[derive(Debug, Clone, Default)]
 pub struct ProviderConfig {
     pub mistral: MistralConfig,
+    pub local: LocalConfig,
 }
 
 #[cfg(test)]
@@ -87,8 +88,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn local_provider_is_not_yet_implemented() {
+    fn local_provider_builds_with_default_config() {
         let result = build(ProviderKind::Local, ProviderConfig::default());
-        assert!(result.is_err());
+        assert!(result.is_ok());
     }
 }

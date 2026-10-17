@@ -54,6 +54,7 @@ fn decode(text: &str) -> Result<ClientMessage, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::protocol::LocalConfig;
     use crate::protocol::MistralConfig;
     use crate::protocol::ProviderKind;
 
@@ -75,6 +76,7 @@ mod tests {
             source_id: "mic".to_string(),
             provider: ProviderKind::Mistral,
             config: MistralConfig::default(),
+            local: LocalConfig::default(),
         };
         let json = serde_json::to_string(&msg).unwrap();
         let back = decode(&json).unwrap();

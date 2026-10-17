@@ -81,7 +81,8 @@ fn handle_command(
             source_id,
             provider,
             config,
-        } => start_session(session, tx, source_id, provider, config),
+            local,
+        } => start_session(session, tx, source_id, provider, config, local),
         ClientMessage::Stop => stop_session(session, tx),
         ClientMessage::Pause => set_paused(session, true),
         ClientMessage::Resume => set_paused(session, false),
@@ -102,6 +103,7 @@ fn start_session(
     source_id: String,
     provider: crate::protocol::ProviderKind,
     config: crate::protocol::MistralConfig,
+    local: crate::protocol::LocalConfig,
 ) {
     // Stop a previous session on this connection, if any.
     session.lock().unwrap().take();
@@ -111,7 +113,10 @@ fn start_session(
         let _ = tx_events.try_send(msg.clone());
     });
 
-    let cfg = ProviderConfig { mistral: config };
+    let cfg = ProviderConfig {
+        mistral: config,
+        local,
+    };
     let new_session = session::start(&source_id, provider, cfg, on_event, None);
     *session.lock().unwrap() = Some(new_session);
 }

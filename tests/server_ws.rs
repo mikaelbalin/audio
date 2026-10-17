@@ -75,6 +75,7 @@ async fn server_answers_list_sources_and_bad_start() {
             source_id: "definitely-not-a-real-source".to_string(),
             provider: audio::protocol::ProviderKind::Mistral,
             config: audio::protocol::MistralConfig::default(),
+            local: audio::protocol::LocalConfig::default(),
         },
     )
     .await;

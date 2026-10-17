@@ -55,6 +55,22 @@ impl Default for MistralConfig {
     }
 }
 
+/// Parameters for the local (offline) provider.
+///
+/// This mirrors the shape the UI will eventually send: a path to a downloaded
+/// sherpa-onnx model directory plus a language hint. Today the model directory
+/// is expected to contain the four Parakeet TDT v3 files
+/// (`encoder.int8.onnx`, `decoder.int8.onnx`, `joiner.int8.onnx`, `tokens.txt`);
+/// downloading/selecting that model from the UI is a separate, later step.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalConfig {
+    /// Directory containing the sherpa-onnx model files.
+    pub model_dir: String,
+    /// Language hint (e.g. "ru" or "en"); an empty string means auto-detect.
+    pub language: String,
+}
+
 /// Which transcription backend to use.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -88,6 +104,10 @@ pub enum ClientMessage {
         source_id: String,
         provider: ProviderKind,
         config: MistralConfig,
+        /// Local-model parameters; ignored by the Mistral provider. Defaults so
+        /// older clients that don't send it still deserialize.
+        #[serde(default)]
+        local: LocalConfig,
     },
     /// Stop the current session.
     Stop,
@@ -179,11 +199,14 @@ mod tests {
                 source_id,
                 provider,
                 config,
+                local,
             } => {
                 assert_eq!(source_id, "alsa_input.usb");
                 assert_eq!(provider, ProviderKind::Mistral);
                 assert_eq!(config.api_key, "key-123");
                 assert_eq!(config.sample_rate, 16000);
+                // Absent `local` defaults to empty, preserving wire compatibility.
+                assert_eq!(local, LocalConfig::default());
             }
             _ => panic!("expected Start"),
         }
@@ -214,11 +237,12 @@ mod tests {
             source_id: "mic-1".to_string(),
             provider: ProviderKind::Mistral,
             config: MistralConfig::default(),
+            local: LocalConfig::default(),
         };
         let json = serde_json::to_string(&msg).unwrap();
         assert_eq!(
             json,
-            r#"{"type":"start","source_id":"mic-1","provider":"mistral","config":{"apiKey":"","baseUrl":"wss://api.mistral.ai","model":"voxtral-mini-transcribe-realtime-2602","sampleRate":16000}}"#
+            r#"{"type":"start","source_id":"mic-1","provider":"mistral","config":{"apiKey":"","baseUrl":"wss://api.mistral.ai","model":"voxtral-mini-transcribe-realtime-2602","sampleRate":16000},"local":{"modelDir":"","language":""}}"#
         );
     }
 }
