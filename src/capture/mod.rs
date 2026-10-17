@@ -15,7 +15,7 @@ use system::SystemAudio;
 /// Anything that yields successive raw PCM chunks until it is stopped or
 /// the stream ends. Implementations are blocking by design — the owning
 /// session runs them on a dedicated thread.
-pub trait AudioStream {
+pub trait AudioStream: Send {
     /// Returns the next chunk, or `None` once the source is exhausted /
     /// stopped. Implementations should not block indefinitely once a stop
     /// has been requested.
