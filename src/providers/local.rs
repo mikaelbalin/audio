@@ -5,6 +5,9 @@
 
 use crate::protocol::{AudioChunk, ServerMessage};
 
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+
 use super::{SessionGuard, TranscriptionProvider};
 
 /// Local transcription (runs in-process, no network).
@@ -31,6 +34,7 @@ impl TranscriptionProvider for LocalProvider {
         &self,
         _chunks: Box<dyn FnMut() -> Option<AudioChunk> + Send>,
         _on_event: Box<dyn FnMut(&ServerMessage) + Send>,
+        _paused: Arc<AtomicBool>,
     ) -> Result<SessionGuard, String> {
         Err("local provider: not yet implemented".to_string())
     }

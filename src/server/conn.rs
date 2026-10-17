@@ -83,6 +83,15 @@ fn handle_command(
             config,
         } => start_session(session, tx, source_id, provider, config),
         ClientMessage::Stop => stop_session(session, tx),
+        ClientMessage::Pause => set_paused(session, true),
+        ClientMessage::Resume => set_paused(session, false),
+    }
+}
+
+/// Mutes/unmutes the active session, if one is running.
+fn set_paused(session: &Arc<Mutex<Option<Session>>>, paused: bool) {
+    if let Some(s) = session.lock().unwrap().as_ref() {
+        s.set_paused(paused);
     }
 }
 

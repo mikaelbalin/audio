@@ -91,6 +91,10 @@ pub enum ClientMessage {
     },
     /// Stop the current session.
     Stop,
+    /// Mute without tearing the session down (provider sends nothing).
+    Pause,
+    /// Unmute, resuming instantly on the same connection.
+    Resume,
     /// Request the list of available capture sources.
     ListSources,
 }

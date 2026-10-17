@@ -17,6 +17,7 @@ use crate::providers::ProviderConfig;
 /// [`Session::stop`] additionally waits for the worker to exit.
 pub struct Session {
     stop_flag: Arc<AtomicBool>,
+    paused: Arc<AtomicBool>,
     handle: Option<std::thread::JoinHandle<()>>,
 }
 
@@ -24,6 +25,18 @@ impl Session {
     /// Returns `true` while the session is still running.
     pub fn is_running(&self) -> bool {
         !self.stop_flag.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// Mutes or unmutes the session without tearing it down. While paused the
+    /// provider sends nothing, so resuming is instant (no reconnect).
+    pub fn set_paused(&self, paused: bool) {
+        self.paused
+            .store(paused, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// Whether the session is currently paused (muted).
+    pub fn is_paused(&self) -> bool {
+        self.paused.load(std::sync::atomic::Ordering::SeqCst)
     }
 
     /// Requests graceful shutdown and waits for the worker thread to exit.
@@ -62,6 +75,8 @@ pub fn start(
 ) -> Session {
     let stop_flag = Arc::new(AtomicBool::new(false));
     let stop_flag_worker = Arc::clone(&stop_flag);
+    let paused = Arc::new(AtomicBool::new(false));
+    let paused_worker = Arc::clone(&paused);
     let source_id = source_id.to_string();
     let on_event: Arc<dyn Fn(&ServerMessage) + Send + Sync> = on_event.into();
     let on_event_err = Arc::clone(&on_event);
@@ -73,6 +88,7 @@ pub fn start(
             sample_rate: 16000,
             on_event,
             on_level,
+            paused: paused_worker,
         };
         if let Err(e) = stream::run(options, provider_kind, provider_config, &stop_flag_worker) {
             on_event_err(&ServerMessage::Error { message: e });
@@ -81,6 +97,7 @@ pub fn start(
 
     Session {
         stop_flag,
+        paused,
         handle: Some(handle),
     }
 }

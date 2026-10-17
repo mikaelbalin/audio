@@ -77,6 +77,7 @@ impl TranscriptionProvider for MistralProvider {
         &self,
         chunks: Box<dyn FnMut() -> Option<AudioChunk> + Send>,
         mut on_event: Box<dyn FnMut(&ServerMessage) + Send>,
+        paused: Arc<AtomicBool>,
     ) -> Result<SessionGuard, String> {
         if self.cfg.api_key.is_empty() {
             return Err("Mistral API key is empty".to_string());
@@ -98,7 +99,7 @@ impl TranscriptionProvider for MistralProvider {
             };
 
             rt.block_on(async move {
-                match run(&cfg, chunks, on_event, &stop_flag_for_session).await {
+                match run(&cfg, chunks, on_event, &stop_flag_for_session, &paused).await {
                     Ok(()) => {}
                     Err(_e) => {}
                 }
@@ -117,6 +118,7 @@ async fn run(
     chunks: Box<dyn FnMut() -> Option<AudioChunk> + Send>,
     on_event: Box<dyn FnMut(&ServerMessage) + Send>,
     stop: &AtomicBool,
+    paused: &Arc<AtomicBool>,
 ) -> Result<(), String> {
     let session = MistralSession::connect(cfg).await?;
 
@@ -149,10 +151,16 @@ async fn run(
         }
     });
 
-    // Audio loop: send chunks synchronously in this task.
+    // Audio loop: send chunks synchronously in this task. While muted we keep
+    // pulling (and discarding) chunks so the capture pipe doesn't fill up and
+    // the muted speech is never buffered or sent; only the socket send is
+    // skipped, so resume is instant with no backlog replay.
     let mut chunks = chunks;
     while !stop.load(Ordering::SeqCst) {
         let Some(chunk) = chunks() else { break };
+        if paused.load(Ordering::SeqCst) {
+            continue; // drained, not sent
+        }
         writer
             .send(Message::Binary(chunk.to_vec()))
             .await
@@ -232,7 +240,11 @@ mod tests {
     #[test]
     fn empty_api_key_is_rejected_early() {
         let provider = MistralProvider::new(MistralConfig::default());
-        let stream = provider.stream(Box::new(|| None::<Vec<u8>>), Box::new(|_| {}));
+        let stream = provider.stream(
+            Box::new(|| None::<Vec<u8>>),
+            Box::new(|_| {}),
+            Arc::new(AtomicBool::new(false)),
+        );
         assert!(stream.is_err());
     }
 }

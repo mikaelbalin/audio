@@ -27,10 +27,15 @@ pub trait TranscriptionProvider {
     /// `on_event` callback is invoked as events arrive; return `false` from it
     /// to stop the session early, or drop the returned [`SessionGuard`] to
     /// request shutdown.
+    ///
+    /// `paused` lets the UI mute the mic without tearing the session down:
+    /// while paused, the provider must not send audio, but keeps the
+    /// connection open so resume is instant.
     fn stream(
         &self,
         chunks: Box<dyn FnMut() -> Option<AudioChunk> + Send>,
         on_event: Box<dyn FnMut(&ServerMessage) + Send>,
+        paused: Arc<AtomicBool>,
     ) -> Result<SessionGuard, String>;
 }
 
