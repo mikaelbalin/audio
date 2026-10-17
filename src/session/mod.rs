@@ -13,10 +13,11 @@ pub use stream::{StreamOptions, run as stream_run};
 
 use crate::providers::ProviderConfig;
 
-/// A running audio session. Dropping it stops capture and transcription.
+/// A running audio session. Dropping it requests shutdown; calling
+/// [`Session::stop`] additionally waits for the worker to exit.
 pub struct Session {
     stop_flag: Arc<AtomicBool>,
-    _handle: std::thread::JoinHandle<()>,
+    handle: Option<std::thread::JoinHandle<()>>,
 }
 
 impl Session {
@@ -24,12 +25,27 @@ impl Session {
     pub fn is_running(&self) -> bool {
         !self.stop_flag.load(std::sync::atomic::Ordering::SeqCst)
     }
+
+    /// Requests graceful shutdown and waits for the worker thread to exit.
+    ///
+    /// Dropping the session requests shutdown without waiting; calling
+    /// `stop()` is the explicit, blocking form used by UI commands.
+    pub fn stop(mut self) {
+        self.stop_flag
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        if let Some(h) = self.handle.take() {
+            let _ = h.join();
+        }
+    }
 }
 
 impl Drop for Session {
     fn drop(&mut self) {
         self.stop_flag
             .store(true, std::sync::atomic::Ordering::SeqCst);
+        if let Some(h) = self.handle.take() {
+            let _ = h.join();
+        }
     }
 }
 
@@ -42,18 +58,21 @@ pub fn start(
     provider_kind: ProviderKind,
     provider_config: ProviderConfig,
     on_event: Box<dyn Fn(&ServerMessage) + Send + Sync>,
+    on_level: Option<Box<dyn Fn(f64) + Send + Sync>>,
 ) -> Session {
     let stop_flag = Arc::new(AtomicBool::new(false));
     let stop_flag_worker = Arc::clone(&stop_flag);
     let source_id = source_id.to_string();
     let on_event: Arc<dyn Fn(&ServerMessage) + Send + Sync> = on_event.into();
     let on_event_err = Arc::clone(&on_event);
+    let on_level: Option<Arc<dyn Fn(f64) + Send + Sync>> = on_level.map(Arc::from);
 
     let handle = std::thread::spawn(move || {
         let options = StreamOptions {
             source_id,
             sample_rate: 16000,
             on_event,
+            on_level,
         };
         if let Err(e) = stream::run(options, provider_kind, provider_config, &stop_flag_worker) {
             on_event_err(&ServerMessage::Error { message: e });
@@ -62,7 +81,7 @@ pub fn start(
 
     Session {
         stop_flag,
-        _handle: handle,
+        handle: Some(handle),
     }
 }
 
@@ -82,10 +101,9 @@ mod tests {
             ProviderKind::Mistral,
             ProviderConfig::default(),
             Box::new(|_| {}),
+            None,
         );
         assert!(session.is_running());
         drop(session);
-        // After drop, the flag is set — the worker thread will observe it and
-        // exit shortly. We don't join here to keep the test deterministic.
     }
 }

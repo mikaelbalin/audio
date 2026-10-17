@@ -5,6 +5,9 @@
 //! keeps capture and transcription fully decoupled, so backends can be
 //! swapped (cloud Mistral, local models, etc.) without touching capture.
 
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use crate::protocol::{AudioChunk, ProviderKind, ServerMessage};
 
 mod local;
@@ -29,26 +32,28 @@ pub trait TranscriptionProvider {
     ) -> Result<SessionGuard, String>;
 }
 
-/// A handle to a running session. Dropping it requests graceful shutdown;
-/// `finish()` additionally waits for the final event to be delivered.
+/// A handle to a running session. Dropping it requests graceful shutdown and
+/// waits for the provider's worker thread to exit.
 pub struct SessionGuard {
-    stop: Option<Box<dyn FnOnce() + Send>>,
+    stop: Arc<AtomicBool>,
+    handle: Option<std::thread::JoinHandle<()>>,
 }
 
 impl SessionGuard {
-    /// Signals the session to stop and waits for the final event to be delivered.
+    /// Signals the session to stop and waits for the worker thread to exit.
     pub fn finish(mut self) {
-        if let Some(stop) = self.stop.take() {
-            stop();
+        self.stop.store(true, Ordering::SeqCst);
+        if let Some(h) = self.handle.take() {
+            let _ = h.join();
         }
-        // `Drop` runs after, but `stop` is already taken (no double-call).
     }
 }
 
 impl Drop for SessionGuard {
     fn drop(&mut self) {
-        if let Some(stop) = self.stop.take() {
-            stop();
+        self.stop.store(true, Ordering::SeqCst);
+        if let Some(h) = self.handle.take() {
+            let _ = h.join();
         }
     }
 }

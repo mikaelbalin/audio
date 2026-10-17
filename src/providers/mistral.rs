@@ -39,6 +39,15 @@ impl Default for MistralConfig {
     }
 }
 
+/// Installs `ring` as the process-level CryptoProvider for rustls.
+///
+/// Rustls (used by tokio-tungstenite for wss) needs one crypto backend chosen
+/// at process level *before* any TLS handshake. Idempotent: subsequent calls
+/// return `Ok` without re-installing.
+fn ensure_crypto_provider() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+}
+
 /// A connected realtime session: an audio writer + an event reader.
 struct MistralSession {
     writer: futures_util::stream::SplitSink<Ws, Message>,
@@ -47,6 +56,8 @@ struct MistralSession {
 
 impl MistralSession {
     async fn connect(cfg: &MistralConfig) -> Result<Self, String> {
+        ensure_crypto_provider();
+
         let url = format!(
             "{base}/v1/audio/transcriptions/realtime?model={model}",
             base = cfg.base_url,
@@ -68,35 +79,6 @@ impl MistralSession {
 
         let (writer, reader) = ws.split();
         Ok(Self { writer, reader })
-    }
-
-    async fn send(&mut self, chunk: &[u8]) -> Result<(), String> {
-        self.writer
-            .send(Message::Binary(chunk.to_vec()))
-            .await
-            .map_err(|e| format!("Failed to send audio: {e}"))
-    }
-
-    async fn finish(&mut self) -> Result<(), String> {
-        self.writer
-            .close()
-            .await
-            .map_err(|e| format!("Failed to close: {e}"))
-    }
-
-    async fn next(&mut self) -> Option<Result<ServerMessage, String>> {
-        loop {
-            let msg = self.reader.next().await?;
-            match msg {
-                Ok(Message::Text(t)) => match parse_event(t.as_bytes()) {
-                    Some(ev) => return Some(Ok(ev)),
-                    None => continue,
-                },
-                Ok(Message::Close(_)) => return None,
-                Ok(_) => continue,
-                Err(e) => return Some(Err(format!("WebSocket error: {e}"))),
-            }
-        }
     }
 }
 
@@ -125,11 +107,7 @@ impl TranscriptionProvider for MistralProvider {
         let stop_flag = Arc::new(AtomicBool::new(false));
         let stop_flag_for_session = Arc::clone(&stop_flag);
 
-        let stop = Box::new(move || {
-            stop_flag.store(true, Ordering::SeqCst);
-        });
-
-        std::thread::spawn(move || {
+        let handle = std::thread::spawn(move || {
             let rt = match tokio::runtime::Runtime::new() {
                 Ok(rt) => rt,
                 Err(e) => {
@@ -148,7 +126,10 @@ impl TranscriptionProvider for MistralProvider {
             });
         });
 
-        Ok(SessionGuard { stop: Some(stop) })
+        Ok(SessionGuard {
+            stop: stop_flag,
+            handle: Some(handle),
+        })
     }
 }
 
@@ -158,24 +139,55 @@ async fn run(
     on_event: &mut (dyn FnMut(&ServerMessage) + Send),
     stop: &AtomicBool,
 ) -> Result<(), String> {
-    let mut session = MistralSession::connect(cfg).await?;
+    let session = MistralSession::connect(cfg).await?;
 
-    while !stop.load(Ordering::SeqCst) {
-        let Some(chunk) = chunks() else { break };
-        session.send(&chunk).await?;
-    }
-    session.finish().await?;
+    // Split the connection so audio writes and event reads proceed in
+    // parallel (full-duplex). Without this, reading events would wait until
+    // the audio loop finished — and the audio loop only finishes on stop,
+    // so `delta`/`done` events would never surface.
+    let mut writer = session.writer;
+    let mut reader = session.reader;
 
-    // Drain until the server closes the stream (or an error arrives).
-    while let Some(event) = session.next().await {
-        let ev = event?;
-        let is_done = ev == ServerMessage::Done;
-        on_event(&ev);
-        if is_done {
-            break;
+    // Read events concurrently with audio sends. `join!` runs both futures
+    // in the same async task, so `on_event` (a `&mut` borrow) is valid for
+    // the whole scope and does not need `'static`.
+    let event_fut = async {
+        loop {
+            match reader.next().await {
+                Some(Ok(Message::Text(t))) => {
+                    if let Some(ev) = parse_event(t.as_bytes()) {
+                        on_event(&ev);
+                    }
+                }
+                Some(Ok(Message::Close(_))) | None => break,
+                Some(Ok(_)) => continue,
+                Some(Err(e)) => {
+                    on_event(&ServerMessage::Error {
+                        message: format!("WebSocket error: {e}"),
+                    });
+                    break;
+                }
+            }
         }
-    }
-    Ok(())
+    };
+
+    let audio_fut = async {
+        while !stop.load(Ordering::SeqCst) {
+            let Some(chunk) = chunks() else { break };
+            writer
+                .send(Message::Binary(chunk.to_vec()))
+                .await
+                .map_err(|e| format!("Failed to send audio: {e}"))?;
+        }
+        writer
+            .close()
+            .await
+            .map_err(|e| format!("Failed to close: {e}"))?;
+        Ok(()) as Result<(), String>
+    };
+
+    let (_, audio_result) = tokio::join!(event_fut, audio_fut);
+    audio_result
 }
 
 /// Parses one JSON event from the realtime stream into a [`ServerMessage`].
