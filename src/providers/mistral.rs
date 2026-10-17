@@ -9,7 +9,7 @@ use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
 
-use crate::protocol::{AudioChunk, ServerMessage};
+use crate::protocol::{AudioChunk, MistralConfig, ServerMessage};
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -17,27 +17,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use super::{SessionGuard, TranscriptionProvider};
 
 type Ws = WebSocketStream<MaybeTlsStream<TcpStream>>;
-
-/// Connection parameters for the Mistral realtime endpoint.
-#[derive(Debug, Clone)]
-pub struct MistralConfig {
-    pub api_key: String,
-    pub base_url: String,
-    pub model: String,
-    /// Sample rate the incoming PCM was captured at (must match capture).
-    pub sample_rate: u32,
-}
-
-impl Default for MistralConfig {
-    fn default() -> Self {
-        Self {
-            api_key: String::new(),
-            base_url: "wss://api.mistral.ai".to_string(),
-            model: "voxtral-mini-transcribe-realtime-2602".to_string(),
-            sample_rate: 16000,
-        }
-    }
-}
 
 /// Installs `ring` as the process-level CryptoProvider for rustls.
 ///

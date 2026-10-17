@@ -12,3 +12,13 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
 tokio-tungstenite = { version = "0.24", features = ["rustls-tls-native-roots"] }
 rustls = { version = "0.23", features = ["ring"] }
 futures-util = { version = "0.3", features = ["sink", "std"] }
+
+[features]
+# WebSocket server binary (`--features server`). Library consumers (Tauri
+# apps) leave this off and don't need server-only tokio I/O features.
+server = ["tokio/net", "tokio/sync"]
+
+[[bin]]
+name = "audio-server"
+path = "src/bin/audio-server.rs"
+required-features = ["server"]

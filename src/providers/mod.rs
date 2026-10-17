@@ -14,7 +14,9 @@ mod local;
 mod mistral;
 
 pub use local::LocalProvider;
-pub use mistral::{MistralConfig, MistralProvider};
+// Re-export so `providers::MistralConfig` keeps working for providers.
+pub use crate::protocol::MistralConfig;
+pub use mistral::MistralProvider;
 
 /// Configuration common to every provider.
 pub trait TranscriptionProvider {

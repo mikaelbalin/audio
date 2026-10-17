@@ -29,6 +29,32 @@ pub struct AudioSource {
     pub is_default: bool,
 }
 
+/// Connection parameters for the Mistral realtime endpoint.
+///
+/// This is part of the shared contract: the UI builds it from its settings and
+/// sends it with every `start`, so neither the Tauri core nor the WebSocket
+/// server ever stores credentials on disk.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MistralConfig {
+    pub api_key: String,
+    pub base_url: String,
+    pub model: String,
+    /// Sample rate the incoming PCM was captured at (must match capture).
+    pub sample_rate: u32,
+}
+
+impl Default for MistralConfig {
+    fn default() -> Self {
+        Self {
+            api_key: String::new(),
+            base_url: "wss://api.mistral.ai".to_string(),
+            model: "voxtral-mini-transcribe-realtime-2602".to_string(),
+            sample_rate: 16000,
+        }
+    }
+}
+
 /// Which transcription backend to use.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -49,6 +75,26 @@ pub struct StartRequest {
     pub provider: ProviderKind,
 }
 
+/// Messages sent from the client to the server (Tauri command or WebSocket).
+///
+/// The discriminant lives in the `type` field, matching the existing frontend
+/// protocol. `Start` carries the full provider configuration so the server is
+/// stateless and never stores credentials.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ClientMessage {
+    /// Start a new transcription session with the given source and config.
+    Start {
+        source_id: String,
+        provider: ProviderKind,
+        config: MistralConfig,
+    },
+    /// Stop the current session.
+    Stop,
+    /// Request the list of available capture sources.
+    ListSources,
+}
+
 /// Events emitted from a running session back to the frontend.
 ///
 /// The discriminant lives in the `type` field (tagged enum), matching the
@@ -64,6 +110,8 @@ pub enum ServerMessage {
     Done,
     /// An error occurred; the session ended.
     Error { message: String },
+    /// Sent in response to `ClientMessage::ListSources`.
+    Sources { sources: Vec<AudioSource> },
     /// The session was stopped.
     Stopped,
 }
@@ -105,6 +153,52 @@ mod tests {
             ServerMessage::Error {
                 message: "boom".to_string(),
             }
+        );
+    }
+
+    #[test]
+    fn client_message_start_carries_full_config() {
+        let raw = r#"{
+            "type": "start",
+            "source_id": "alsa_input.usb",
+            "provider": "mistral",
+            "config": {
+                "apiKey": "key-123",
+                "baseUrl": "wss://api.mistral.ai",
+                "model": "voxtral-mini-transcribe-realtime-2602",
+                "sampleRate": 16000
+            }
+        }"#;
+        let msg: ClientMessage = serde_json::from_str(raw).unwrap();
+        match msg {
+            ClientMessage::Start {
+                source_id,
+                provider,
+                config,
+            } => {
+                assert_eq!(source_id, "alsa_input.usb");
+                assert_eq!(provider, ProviderKind::Mistral);
+                assert_eq!(config.api_key, "key-123");
+                assert_eq!(config.sample_rate, 16000);
+            }
+            _ => panic!("expected Start"),
+        }
+    }
+
+    #[test]
+    fn serializes_sources_response() {
+        let msg = ServerMessage::Sources {
+            sources: vec![AudioSource {
+                id: "mic".to_string(),
+                name: "Default mic".to_string(),
+                kind: SourceKind::Microphone,
+                is_default: true,
+            }],
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(
+            json.contains(r#""type":"sources""#),
+            "sources message must carry the type tag, got: {json}"
         );
     }
 }
