@@ -9,6 +9,7 @@
 //!   crate grows.
 
 pub mod capture;
+pub mod model_store;
 pub mod protocol;
 pub mod providers;
 pub mod session;
