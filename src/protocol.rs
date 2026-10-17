@@ -201,4 +201,20 @@ mod tests {
             "sources message must carry the type tag, got: {json}"
         );
     }
+
+    /// The exact wire format the WebSocket frontend must send. Pinning it in a
+    /// test prevents drift if the serde attributes on `ClientMessage` change.
+    #[test]
+    fn start_message_wire_format() {
+        let msg = ClientMessage::Start {
+            source_id: "mic-1".to_string(),
+            provider: ProviderKind::Mistral,
+            config: MistralConfig::default(),
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        assert_eq!(
+            json,
+            r#"{"type":"start","source_id":"mic-1","provider":"mistral","config":{"apiKey":"","baseUrl":"wss://api.mistral.ai","model":"voxtral-mini-transcribe-realtime-2602","sampleRate":16000}}"#
+        );
+    }
 }
