@@ -1,12 +1,12 @@
 //! Internal stream loop: capture → provider → events.
 //!
-//! The capture itself blocks on `parec`'s stdout. To make `stop` effective
-//! quickly, the raw capture runs on its own thread and forwards chunks down a
-//! channel; the provider-side loop polls that channel with a short timeout,
-//! so a stop request is honoured within ~50 ms even mid-read.
+//! The capture blocks on `parec`'s stdout (~40 ms per chunk), which is fine:
+//! we run the whole capture → transcribe → emit cycle synchronously on the
+//! session's own thread, exactly like the pre-crate implementation did. There
+//! are no intermediate channels or polling sleeps, so latency stays low.
 
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, mpsc};
 
 use crate::capture;
 use crate::protocol::{AudioChunk, ServerMessage};
@@ -29,54 +29,28 @@ pub fn run(
     provider_config: ProviderConfig,
     stop_flag: &Arc<AtomicBool>,
 ) -> Result<(), String> {
-    // 1. Raw capture on its own thread; sends chunks into a channel.
-    let (tx, rx) = mpsc::channel::<Option<AudioChunk>>();
-    {
-        let mut stream = capture::start(&options.source_id, options.sample_rate)?;
-        std::thread::spawn(move || {
-            loop {
-                match stream.next_chunk() {
-                    Some(c) => {
-                        if tx.send(Some(c)).is_err() {
-                            break; // receiver dropped
-                        }
-                    }
-                    None => {
-                        let _ = tx.send(None);
-                        break;
-                    }
-                }
-            }
-        });
-    }
+    // Start capture.
+    let mut stream = capture::start(&options.source_id, options.sample_rate)?;
 
-    // 2. Provider-side pull source polls the channel with a short timeout so
-    //    a stop signal is honoured without waiting for the next capture read.
-    let on_level = options.on_level.clone();
-    let chunk_source: Box<dyn FnMut() -> Option<AudioChunk> + Send> = {
-        let stop_flag = Arc::clone(stop_flag);
-        Box::new(move || {
-            loop {
-                if stop_flag.load(Ordering::SeqCst) {
-                    return None;
-                }
-                match rx.recv_timeout(std::time::Duration::from_millis(50)) {
-                    Ok(Some(c)) => {
-                        if let Some(level) = &on_level {
-                            level(super::level::rms_level(&c));
-                        }
-                        return Some(c);
-                    }
-                    Ok(None) => return None,
-                    Err(mpsc::RecvTimeoutError::Timeout) => continue,
-                    Err(mpsc::RecvTimeoutError::Disconnected) => return None,
-                }
-            }
-        })
-    };
-
-    // 3. Provider gets chunks and pushes events to the UI.
+    // Build the provider.
     let provider = build(provider_kind, provider_config)?;
+
+    // Pull chunks straight from the capture and hand them to the provider.
+    // `next_chunk` blocks only ~40 ms, so checking `stop_flag` between chunks
+    // is enough to honour a stop within one chunk's worth of audio.
+    let on_level = options.on_level.clone();
+    let stop_for_source = Arc::clone(stop_flag);
+    let chunk_source: Box<dyn FnMut() -> Option<AudioChunk> + Send> = Box::new(move || {
+        if stop_for_source.load(Ordering::SeqCst) {
+            return None;
+        }
+        let chunk = stream.next_chunk()?;
+        if let Some(level) = &on_level {
+            level(super::level::rms_level(&chunk));
+        }
+        Some(chunk)
+    });
+
     let on_event = Arc::clone(&options.on_event);
     let stop_for_events = Arc::clone(stop_flag);
     let session = provider.stream(
@@ -89,17 +63,15 @@ pub fn run(
         }),
     )?;
 
-    // 4. Tell the UI we are live.
+    // Tell the UI we are live.
     (options.on_event)(&ServerMessage::Ready);
 
-    // 5. Keep the session alive until a stop is requested. Holding `session`
-    //    (a SessionGuard with its worker JoinHandle) prevents the provider
-    //    thread from being dropped/joined prematurely.
+    // Keep the session alive until a stop is requested. The provider runs on
+    // its own thread; holding the guard prevents premature shutdown.
     while !stop_flag.load(Ordering::SeqCst) {
-        std::thread::sleep(std::time::Duration::from_millis(50));
+        std::thread::sleep(std::time::Duration::from_millis(10));
     }
 
-    // 6. Graceful stop: request the provider to finish and join its thread.
     session.finish();
     Ok(())
 }

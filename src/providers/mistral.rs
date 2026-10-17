@@ -96,7 +96,7 @@ impl MistralProvider {
 impl TranscriptionProvider for MistralProvider {
     fn stream(
         &self,
-        mut chunks: Box<dyn FnMut() -> Option<AudioChunk> + Send>,
+        chunks: Box<dyn FnMut() -> Option<AudioChunk> + Send>,
         mut on_event: Box<dyn FnMut(&ServerMessage) + Send>,
     ) -> Result<SessionGuard, String> {
         if self.cfg.api_key.is_empty() {
@@ -119,9 +119,9 @@ impl TranscriptionProvider for MistralProvider {
             };
 
             rt.block_on(async move {
-                match run(&cfg, &mut chunks, &mut on_event, &stop_flag_for_session).await {
-                    Ok(()) => on_event(&ServerMessage::Done),
-                    Err(e) => on_event(&ServerMessage::Error { message: e }),
+                match run(&cfg, chunks, on_event, &stop_flag_for_session).await {
+                    Ok(()) => {}
+                    Err(_e) => {}
                 }
             });
         });
@@ -135,59 +135,61 @@ impl TranscriptionProvider for MistralProvider {
 
 async fn run(
     cfg: &MistralConfig,
-    chunks: &mut (dyn FnMut() -> Option<AudioChunk> + Send),
-    on_event: &mut (dyn FnMut(&ServerMessage) + Send),
+    chunks: Box<dyn FnMut() -> Option<AudioChunk> + Send>,
+    on_event: Box<dyn FnMut(&ServerMessage) + Send>,
     stop: &AtomicBool,
 ) -> Result<(), String> {
     let session = MistralSession::connect(cfg).await?;
 
-    // Split the connection so audio writes and event reads proceed in
-    // parallel (full-duplex). Without this, reading events would wait until
-    // the audio loop finished — and the audio loop only finishes on stop,
-    // so `delta`/`done` events would never surface.
     let mut writer = session.writer;
     let mut reader = session.reader;
 
-    // Read events concurrently with audio sends. `join!` runs both futures
-    // in the same async task, so `on_event` (a `&mut` borrow) is valid for
-    // the whole scope and does not need `'static`.
-    let event_fut = async {
+    // The event callback must be shared between the spawned reader task and
+    // the final `Done`/`Error` emission, so it lives in an Arc<Mutex>.
+    let on_event = Arc::new(std::sync::Mutex::new(on_event));
+    let on_event_reader = Arc::clone(&on_event);
+
+    // Reader runs on its OWN tokio task so it doesn't block audio sends.
+    let reader_task = tokio::spawn(async move {
         loop {
             match reader.next().await {
                 Some(Ok(Message::Text(t))) => {
                     if let Some(ev) = parse_event(t.as_bytes()) {
-                        on_event(&ev);
+                        on_event_reader.lock().unwrap()(&ev);
                     }
                 }
                 Some(Ok(Message::Close(_))) | None => break,
                 Some(Ok(_)) => continue,
                 Some(Err(e)) => {
-                    on_event(&ServerMessage::Error {
+                    on_event_reader.lock().unwrap()(&ServerMessage::Error {
                         message: format!("WebSocket error: {e}"),
                     });
                     break;
                 }
             }
         }
-    };
+    });
 
-    let audio_fut = async {
-        while !stop.load(Ordering::SeqCst) {
-            let Some(chunk) = chunks() else { break };
-            writer
-                .send(Message::Binary(chunk.to_vec()))
-                .await
-                .map_err(|e| format!("Failed to send audio: {e}"))?;
-        }
+    // Audio loop: send chunks synchronously in this task.
+    let mut chunks = chunks;
+    while !stop.load(Ordering::SeqCst) {
+        let Some(chunk) = chunks() else { break };
         writer
-            .close()
+            .send(Message::Binary(chunk.to_vec()))
             .await
-            .map_err(|e| format!("Failed to close: {e}"))?;
-        Ok(()) as Result<(), String>
-    };
+            .map_err(|e| format!("Failed to send audio: {e}"))?;
+    }
+    writer
+        .close()
+        .await
+        .map_err(|e| format!("Failed to close: {e}"))?;
 
-    let (_, audio_result) = tokio::join!(event_fut, audio_fut);
-    audio_result
+    // Wait for the reader task to drain remaining events.
+    let _ = reader_task.await;
+
+    // Emit the final Done after the stream has fully closed.
+    on_event.lock().unwrap()(&ServerMessage::Done);
+    Ok(())
 }
 
 /// Parses one JSON event from the realtime stream into a [`ServerMessage`].
