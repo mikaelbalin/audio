@@ -113,9 +113,48 @@ fn parakeet_tdt_v3() -> ModelEntry {
     }
 }
 
+/// The local Nemotron 3.5 ASR Streaming 0.6B (int8) model — 40 languages
+/// including Russian and English, cache-aware streaming (~0.56s latency).
+fn nemotron_3_5_asr_streaming() -> ModelEntry {
+    ModelEntry {
+        id: "nemotron-3.5-asr-streaming".to_string(),
+        name: "Nemotron 3.5 ASR Streaming 0.6B".to_string(),
+        repo: "Masterx/sherpa-onnx-nemotron-3.5-asr-streaming-0.6b-560ms-2026-06-11".to_string(),
+        revision: "3f1f6020667b151d0b6820cc4b8ae4f42b6d35fc".to_string(),
+        files: vec![
+            ModelFile {
+                name: "encoder.int8.onnx".to_string(),
+                size: 657601403,
+                sha256: Some(
+                    "874275f509c86e331eb1c1f1e2f7fa48c39144de94f98ccbe6ae3fcdc18df38a".to_string(),
+                ),
+            },
+            ModelFile {
+                name: "decoder.int8.onnx".to_string(),
+                size: 14978075,
+                sha256: Some(
+                    "19f9c98fc6d0a2c33a65a43b36fdb2e914c26c0aa9764be3aebc502a1e982fb0".to_string(),
+                ),
+            },
+            ModelFile {
+                name: "joiner.int8.onnx".to_string(),
+                size: 9504438,
+                sha256: Some(
+                    "4101c7c679a0bc30483794b27a059e34e79232aa2068d78d51231a22c8b0d7ce".to_string(),
+                ),
+            },
+            ModelFile {
+                name: "tokens.txt".to_string(),
+                size: 144528,
+                sha256: None,
+            },
+        ],
+    }
+}
+
 /// All models currently offered for download.
 pub fn all_models() -> Vec<ModelEntry> {
-    vec![parakeet_tdt_v3()]
+    vec![parakeet_tdt_v3(), nemotron_3_5_asr_streaming()]
 }
 
 /// Looks up a model by id.
