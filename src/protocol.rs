@@ -57,16 +57,14 @@ impl Default for MistralConfig {
 
 /// Parameters for the local (offline) provider.
 ///
-/// This mirrors the shape the UI will eventually send: a path to a downloaded
-/// sherpa-onnx model directory plus a language hint. Today the model directory
-/// is expected to contain the four Parakeet TDT v3 files
-/// (`encoder.int8.onnx`, `decoder.int8.onnx`, `joiner.int8.onnx`, `tokens.txt`);
-/// downloading/selecting that model from the UI is a separate, later step.
+/// Identifies a model by its catalog id (see `model_store::catalog`); the
+/// on-disk directory is resolved by the crate, not supplied by the UI. The
+/// language hint is optional — an empty string means the model auto-detects.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct LocalConfig {
-    /// Directory containing the sherpa-onnx model files.
-    pub model_dir: String,
+    /// Catalog id of the model to run (e.g. "parakeet-tdt-v3").
+    pub model_id: String,
     /// Language hint (e.g. "ru" or "en"); an empty string means auto-detect.
     pub language: String,
 }
@@ -242,7 +240,7 @@ mod tests {
         let json = serde_json::to_string(&msg).unwrap();
         assert_eq!(
             json,
-            r#"{"type":"start","source_id":"mic-1","provider":"mistral","config":{"apiKey":"","baseUrl":"wss://api.mistral.ai","model":"voxtral-mini-transcribe-realtime-2602","sampleRate":16000},"local":{"modelDir":"","language":""}}"#
+            r#"{"type":"start","source_id":"mic-1","provider":"mistral","config":{"apiKey":"","baseUrl":"wss://api.mistral.ai","model":"voxtral-mini-transcribe-realtime-2602","sampleRate":16000},"local":{"modelId":"","language":""}}"#
         );
     }
 }

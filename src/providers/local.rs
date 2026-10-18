@@ -1,8 +1,9 @@
 //! Local transcription provider (offline, via sherpa-onnx).
 //!
 //! Runs a Parakeet-style NeMo transducer model entirely in-process, so no
-//! network or API key is needed. The model directory is supplied through
-//! [`LocalConfig`] and must contain the four sherpa-onnx files for
+//! network or API key is needed. The model is identified by its catalog id (see
+//! [`crate::model_store`]) and its on-disk directory is resolved from the shared
+//! model store; it must contain the four sherpa-onnx files for
 //! `parakeet-tdt-0.6b-v3`:
 //!
 //! ```text
@@ -12,15 +13,13 @@
 //! tokens.txt
 //! ```
 //!
-//! Downloading and selecting the model from the UI is a later step; for now
-//! the path is expected to already exist on disk. This first version buffers
-//! audio and transcribes in one pass at stop time — live streaming preview
-//! (VAD + incremental decoding) is a follow-up.
+//! This first version buffers audio and transcribes in one pass at stop time —
+//! live streaming preview (VAD + incremental decoding) is a follow-up.
 
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use crate::model_store;
 use crate::protocol::{AudioChunk, LocalConfig, ServerMessage};
 
 use super::{SessionGuard, TranscriptionProvider};
@@ -69,14 +68,17 @@ impl TranscriptionProvider for LocalProvider {
         mut on_event: Box<dyn FnMut(&ServerMessage) + Send>,
         paused: Arc<AtomicBool>,
     ) -> Result<SessionGuard, String> {
-        let model_dir = self.config.model_dir.trim();
-        if model_dir.is_empty() {
-            return Err("local provider: model_dir is empty".to_string());
+        let model_id = self.config.model_id.trim();
+        if model_id.is_empty() {
+            return Err("local provider: model_id is empty".to_string());
         }
+
+        // Resolve the on-disk directory from the shared model store.
+        let model_dir = model_store::model_dir(model_id);
 
         // Build the sherpa-onnx recognizer up front so a bad path fails the
         // `start` command immediately instead of after the first chunk.
-        let recognizer = build_recognizer(model_dir)?;
+        let recognizer = build_recognizer(&model_dir)?;
 
         let stop_flag = Arc::new(AtomicBool::new(false));
         let stop_flag_for_worker = Arc::clone(&stop_flag);
@@ -126,8 +128,8 @@ impl TranscriptionProvider for LocalProvider {
 
 /// Builds an [`sherpa_onnx::OfflineRecognizer`] for the Parakeet TDT model in
 /// `model_dir`. Returns a descriptive error if any file is missing.
-fn build_recognizer(model_dir: &str) -> Result<sherpa_onnx::OfflineRecognizer, String> {
-    let dir = PathBuf::from(model_dir);
+fn build_recognizer(model_dir: &std::path::Path) -> Result<sherpa_onnx::OfflineRecognizer, String> {
+    let dir = model_dir;
 
     let mut missing = Vec::new();
     for file in MODEL_FILES {
@@ -137,7 +139,8 @@ fn build_recognizer(model_dir: &str) -> Result<sherpa_onnx::OfflineRecognizer, S
     }
     if !missing.is_empty() {
         return Err(format!(
-            "local provider: model_dir '{model_dir}' is missing: {}",
+            "local provider: model dir '{}' is missing: {}",
+            dir.display(),
             missing.join(", ")
         ));
     }
@@ -151,8 +154,12 @@ fn build_recognizer(model_dir: &str) -> Result<sherpa_onnx::OfflineRecognizer, S
     config.model_config.tokens = Some(dir.join("tokens.txt").to_string_lossy().into_owned());
     config.model_config.model_type = Some("nemo_transducer".into());
 
-    sherpa_onnx::OfflineRecognizer::create(&config)
-        .ok_or_else(|| format!("local provider: failed to load model from '{model_dir}'"))
+    sherpa_onnx::OfflineRecognizer::create(&config).ok_or_else(|| {
+        format!(
+            "local provider: failed to load model from '{}'",
+            dir.display()
+        )
+    })
 }
 
 /// Runs the recognizer over a buffered, normalized `f32` waveform.
@@ -190,7 +197,7 @@ mod tests {
     }
 
     #[test]
-    fn empty_model_dir_is_rejected() {
+    fn empty_model_id_is_rejected() {
         let provider = LocalProvider::new(LocalConfig::default());
         let result = provider.stream(
             Box::new(|| None::<Vec<u8>>),
@@ -202,7 +209,8 @@ mod tests {
 
     #[test]
     fn missing_model_files_are_reported() {
-        match build_recognizer("/definitely/not/a/real/model/dir") {
+        let dir = std::path::Path::new("/definitely/not/a/real/model/dir");
+        match build_recognizer(dir) {
             Ok(_) => panic!("expected an error for a missing model directory"),
             Err(msg) => assert!(msg.contains("missing"), "unexpected error: {msg}"),
         }
