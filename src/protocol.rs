@@ -7,6 +7,11 @@ use crate::model_store::ModelStatus;
 /// A chunk of raw PCM audio. `pcm_s16le`, mono, 16 kHz.
 pub type AudioChunk = Vec<u8>;
 
+/// Sentinel `source_id` meaning the client (browser) captures audio itself via
+/// the Web Audio API and pushes raw PCM chunks over the WebSocket connection.
+/// The server must not attempt local capture when this id is used.
+pub const BROWSER_SOURCE_ID: &str = "__browser__";
+
 /// A kind of audio source that can be captured.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

@@ -7,6 +7,7 @@
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::Receiver;
 
 use crate::capture;
 use crate::protocol::{AudioChunk, ServerMessage};
@@ -23,6 +24,10 @@ pub struct StreamOptions {
     /// Shared pause flag: when set, the provider stops sending audio but keeps
     /// the session alive for an instant resume.
     pub paused: Arc<AtomicBool>,
+    /// Optional external chunk source (e.g. browser-captured audio pushed over
+    /// a WebSocket). When `Some`, capture is bypassed and chunks are pulled
+    /// from this receiver instead of a local `parec` source.
+    pub external_chunks: Option<Receiver<AudioChunk>>,
 }
 
 /// Runs the full capture → transcribe → emit cycle.
@@ -32,35 +37,64 @@ pub fn run(
     provider_config: ProviderConfig,
     stop_flag: &Arc<AtomicBool>,
 ) -> Result<(), String> {
-    // Start capture.
-    let mut stream = capture::start(&options.source_id, options.sample_rate)?;
-
     // Build the provider.
     let provider = build(provider_kind, provider_config)?;
 
-    // Pull chunks straight from the capture and hand them to the provider.
-    // `next_chunk` blocks only ~40 ms, so checking `stop_flag` between chunks
-    // is enough to honour a stop within one chunk's worth of audio.
     let on_level = options.on_level.clone();
     let stop_for_source = Arc::clone(stop_flag);
     let mut chunk_count: usize = 0;
-    let chunk_source: Box<dyn FnMut() -> Option<AudioChunk> + Send> = Box::new(move || {
-        if stop_for_source.load(Ordering::SeqCst) {
-            return None;
+
+    // The chunk source is either the local capture (`parec`) or an external
+    // stream of chunks pushed by the client (browser Web Audio capture).
+    let chunk_source: Box<dyn FnMut() -> Option<AudioChunk> + Send> = match options.external_chunks
+    {
+        Some(rx) => {
+            let rx = rx;
+            Box::new(move || {
+                if stop_for_source.load(Ordering::SeqCst) {
+                    return None;
+                }
+                // Block until a chunk arrives or the sender is dropped.
+                match rx.recv() {
+                    Ok(chunk) => {
+                        chunk_count += 1;
+                        if chunk_count == 1 || chunk_count.is_multiple_of(200) {
+                            eprintln!(
+                                "[audio:stream] received chunk #{chunk_count} len={}",
+                                chunk.len()
+                            );
+                        }
+                        if let Some(level) = &on_level {
+                            level(super::level::rms_level(&chunk));
+                        }
+                        Some(chunk)
+                    }
+                    Err(_) => None,
+                }
+            })
         }
-        let chunk = stream.next_chunk()?;
-        chunk_count += 1;
-        if chunk_count == 1 || chunk_count.is_multiple_of(200) {
-            eprintln!(
-                "[audio:stream] captured chunk #{chunk_count} len={}",
-                chunk.len()
-            );
+        None => {
+            // Start capture locally.
+            let mut stream = capture::start(&options.source_id, options.sample_rate)?;
+            Box::new(move || {
+                if stop_for_source.load(Ordering::SeqCst) {
+                    return None;
+                }
+                let chunk = stream.next_chunk()?;
+                chunk_count += 1;
+                if chunk_count == 1 || chunk_count.is_multiple_of(200) {
+                    eprintln!(
+                        "[audio:stream] captured chunk #{chunk_count} len={}",
+                        chunk.len()
+                    );
+                }
+                if let Some(level) = &on_level {
+                    level(super::level::rms_level(&chunk));
+                }
+                Some(chunk)
+            })
         }
-        if let Some(level) = &on_level {
-            level(super::level::rms_level(&chunk));
-        }
-        Some(chunk)
-    });
+    };
 
     let on_event = Arc::clone(&options.on_event);
     let stop_for_events = Arc::clone(stop_flag);
@@ -117,6 +151,7 @@ mod tests {
             on_event: Arc::new(|_| {}),
             on_level: None,
             paused: Arc::new(AtomicBool::new(false)),
+            external_chunks: None,
         };
         assert_eq!(opts.sample_rate, 16000);
     }

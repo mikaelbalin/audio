@@ -8,13 +8,14 @@
 
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::sync::mpsc;
 
 use futures_util::{SinkExt, StreamExt};
 use tokio::net::TcpStream;
-use tokio::sync::mpsc;
+use tokio::sync::mpsc as tmpsc;
 use tokio_tungstenite::tungstenite::Message;
 
-use crate::protocol::{ClientMessage, ServerMessage};
+use crate::protocol::{AudioChunk, BROWSER_SOURCE_ID, ClientMessage, ServerMessage};
 use crate::providers::ProviderConfig;
 use crate::session::{self, Session};
 
@@ -32,10 +33,15 @@ pub async fn handle(tcp: TcpStream) -> Result<(), String> {
 
     // Session events cross from the session's blocking thread into this async
     // task through a channel, so the single writer owns the socket.
-    let (tx, mut rx) = mpsc::channel::<ServerMessage>(EVENT_CHANNEL);
+    let (tx, mut rx) = tmpsc::channel::<ServerMessage>(EVENT_CHANNEL);
 
     // The current session, shared so the read loop can stop/start it.
     let session: Arc<Mutex<Option<Session>>> = Arc::new(Mutex::new(None));
+
+    // Sender for browser-captured audio chunks. `None` until a browser-source
+    // session starts; binary frames are pushed through it to the session's
+    // blocking worker via a sync mpsc channel.
+    let chunk_tx: Arc<Mutex<Option<mpsc::Sender<AudioChunk>>>> = Arc::new(Mutex::new(None));
 
     // Writer task: drain the channel and send text frames.
     let writer = tokio::spawn(async move {
@@ -47,15 +53,22 @@ pub async fn handle(tcp: TcpStream) -> Result<(), String> {
         }
     });
 
-    // Read loop: interpret client commands.
+    // Read loop: interpret client commands and browser audio frames.
     while let Some(frame) = stream.next().await {
         let frame = frame.map_err(|e| format!("read failed: {e}"))?;
-        let Message::Text(text) = frame else {
-            continue; // ignore binary/ping/pong
-        };
-        match super::decode(&text) {
-            Ok(cmd) => handle_command(cmd, &session, &tx),
-            Err(e) => send(&tx, ServerMessage::Error { message: e }),
+        match frame {
+            Message::Text(text) => match super::decode(&text) {
+                Ok(cmd) => handle_command(cmd, &session, &tx, &chunk_tx),
+                Err(e) => send(&tx, ServerMessage::Error { message: e }),
+            },
+            // Binary frames carry raw PCM chunks from the browser (Web Audio
+            // capture). Forward them to the active browser-source session.
+            Message::Binary(bytes) => {
+                if let Some(sender) = chunk_tx.lock().unwrap().as_ref() {
+                    let _ = sender.send(bytes.to_vec());
+                }
+            }
+            _ => {} // ignore ping/pong/close
         }
     }
 
@@ -70,7 +83,8 @@ pub async fn handle(tcp: TcpStream) -> Result<(), String> {
 fn handle_command(
     cmd: ClientMessage,
     session: &Arc<Mutex<Option<Session>>>,
-    tx: &mpsc::Sender<ServerMessage>,
+    tx: &tmpsc::Sender<ServerMessage>,
+    chunk_tx: &Arc<Mutex<Option<mpsc::Sender<AudioChunk>>>>,
 ) {
     match cmd {
         ClientMessage::ListSources => match session::list_sources() {
@@ -82,7 +96,7 @@ fn handle_command(
             provider,
             config,
             local,
-        } => start_session(session, tx, source_id, provider, config, local),
+        } => start_session(session, tx, chunk_tx, source_id, provider, config, local),
         ClientMessage::Stop => stop_session(session, tx),
         ClientMessage::Pause => set_paused(session, true),
         ClientMessage::Resume => set_paused(session, false),
@@ -102,14 +116,17 @@ fn set_paused(session: &Arc<Mutex<Option<Session>>>, paused: bool) {
 /// Starts a session, replacing any existing one for this connection.
 fn start_session(
     session: &Arc<Mutex<Option<Session>>>,
-    tx: &mpsc::Sender<ServerMessage>,
+    tx: &tmpsc::Sender<ServerMessage>,
+    chunk_tx: &Arc<Mutex<Option<mpsc::Sender<AudioChunk>>>>,
     source_id: String,
     provider: crate::protocol::ProviderKind,
     config: crate::protocol::MistralConfig,
     local: crate::protocol::LocalConfig,
 ) {
-    // Stop a previous session on this connection, if any.
+    // Stop a previous session on this connection, if any, and drop any stale
+    // browser chunk sender so the previous session's worker unblocks.
     session.lock().unwrap().take();
+    *chunk_tx.lock().unwrap() = None;
 
     let tx_events = tx.clone();
     let on_event = Box::new(move |msg: &ServerMessage| {
@@ -120,26 +137,37 @@ fn start_session(
         mistral: config,
         local,
     };
-    let new_session = session::start(&source_id, provider, cfg, on_event, None);
+
+    // Browser-captured audio: bypass local capture and wire binary frames into
+    // the session via a sync mpsc channel.
+    let external_chunks = if source_id == BROWSER_SOURCE_ID {
+        let (sender, receiver) = mpsc::channel::<AudioChunk>();
+        *chunk_tx.lock().unwrap() = Some(sender);
+        Some(receiver)
+    } else {
+        None
+    };
+
+    let new_session = session::start(&source_id, provider, cfg, on_event, None, external_chunks);
     *session.lock().unwrap() = Some(new_session);
 }
 
 /// Stops the current session, if any, and reports it.
-fn stop_session(session: &Arc<Mutex<Option<Session>>>, tx: &mpsc::Sender<ServerMessage>) {
+fn stop_session(session: &Arc<Mutex<Option<Session>>>, tx: &tmpsc::Sender<ServerMessage>) {
     if session.lock().unwrap().take().is_some() {
         send(tx, ServerMessage::Stopped);
     }
 }
 
 /// Sends the full catalog with download status.
-fn list_models(tx: &mpsc::Sender<ServerMessage>) {
+fn list_models(tx: &tmpsc::Sender<ServerMessage>) {
     let models = crate::model_store::all_statuses();
     send(tx, ServerMessage::Models { models });
 }
 
 /// Starts downloading a model on a blocking thread; streams progress events,
 /// then `ModelDone`/`ModelError`, and finally a fresh catalog.
-fn download_model(tx: &mpsc::Sender<ServerMessage>, id: String) {
+fn download_model(tx: &tmpsc::Sender<ServerMessage>, id: String) {
     let entry = match crate::model_store::find(&id) {
         Some(e) => e,
         None => {
@@ -185,7 +213,7 @@ fn download_model(tx: &mpsc::Sender<ServerMessage>, id: String) {
 }
 
 /// Deletes a model and reports the fresh catalog (or an error).
-fn delete_model(tx: &mpsc::Sender<ServerMessage>, id: String) {
+fn delete_model(tx: &tmpsc::Sender<ServerMessage>, id: String) {
     if let Err(message) = crate::model_store::delete_model(&id) {
         send(tx, ServerMessage::ModelError { id, message });
         return;
@@ -195,6 +223,6 @@ fn delete_model(tx: &mpsc::Sender<ServerMessage>, id: String) {
 }
 
 /// Best-effort enqueue of an outbound event.
-fn send(tx: &mpsc::Sender<ServerMessage>, msg: ServerMessage) {
+fn send(tx: &tmpsc::Sender<ServerMessage>, msg: ServerMessage) {
     let _ = tx.try_send(msg);
 }

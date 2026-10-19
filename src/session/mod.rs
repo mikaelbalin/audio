@@ -66,12 +66,18 @@ impl Drop for Session {
 ///
 /// `on_event` is wrapped in `Arc` internally so errors can be emitted even if
 /// part of the pipeline holds a reference at the time of a failure.
+///
+/// `external_chunks`, when `Some`, bypasses local capture: the session pulls
+/// PCM chunks from the receiver instead of opening a `parec` source. This is
+/// used by the browser build, where audio is captured via the Web Audio API and
+/// pushed over the WebSocket connection.
 pub fn start(
     source_id: &str,
     provider_kind: ProviderKind,
     provider_config: ProviderConfig,
     on_event: Box<dyn Fn(&ServerMessage) + Send + Sync>,
     on_level: Option<Box<dyn Fn(f64) + Send + Sync>>,
+    external_chunks: Option<std::sync::mpsc::Receiver<crate::protocol::AudioChunk>>,
 ) -> Session {
     let stop_flag = Arc::new(AtomicBool::new(false));
     let stop_flag_worker = Arc::clone(&stop_flag);
@@ -89,6 +95,7 @@ pub fn start(
             on_event,
             on_level,
             paused: paused_worker,
+            external_chunks,
         };
         if let Err(e) = stream::run(options, provider_kind, provider_config, &stop_flag_worker) {
             on_event_err(&ServerMessage::Error { message: e });
@@ -118,6 +125,7 @@ mod tests {
             ProviderKind::Mistral,
             ProviderConfig::default(),
             Box::new(|_| {}),
+            None,
             None,
         );
         assert!(session.is_running());
