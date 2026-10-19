@@ -1,0 +1,12 @@
+# Build-time environment for the `audio` crate.
+#
+# `transcribe-cpp-sys` compiles the native ggml/transcribe.cpp C++ core with
+# CMake, which needs to find the Vulkan SDK (loader + headers + glslc) for the
+# GPU backend. On this machine those come from Homebrew (Linuxbrew), which is
+# not on CMake's default search path, so we point CMAKE_PREFIX_PATH at it.
+#
+# Override per-machine with an explicit CMAKE_ARGS env var if your Vulkan SDK
+# lives elsewhere (e.g. system /usr or a custom SDK install).
+
+[env]
+CMAKE_ARGS = "-DCMAKE_PREFIX_PATH=/home/linuxbrew/.linuxbrew"

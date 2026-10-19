@@ -39,19 +39,32 @@ model is a single GGUF file downloaded into
 ## Prerequisites
 
 Building this crate compiles the native `transcribe.cpp` C++ core (ggml) from
-source, which requires a C++ toolchain and **CMake**.
+source, which requires a C++ toolchain, **CMake**, and (for GPU acceleration)
+the **Vulkan SDK**. The build enables the Vulkan backend by default (AMD / NVIDIA
+/ Intel GPUs on Linux).
 
 ### Fedora / Bazzite
 
-Bazzite is an immutable, Fedora-based distribution. Install CMake via Homebrew
-(Linuxbrew), which keeps dev tools in the user's home and does not touch the
+Bazzite is an immutable, Fedora-based distribution. Install the build tools via
+Homebrew (Linuxbrew), which keeps them in the user's home and does not touch the
 immutable base system:
 
 ```bash
-brew install cmake
+brew install cmake shaderc vulkan-headers vulkan-loader
 ```
 
-`gcc`/`g++` are already present as system packages; only `cmake` is missing.
+- `cmake` — builds the native C++ core.
+- `shaderc` — provides `glslc`, the Vulkan shader compiler ggml needs.
+- `vulkan-headers` — Vulkan API headers.
+- `vulkan-loader` — the `libvulkan.so` loader the ggml Vulkan backend links.
+
+`gcc`/`g++` are already present as system packages.
+
+### Other distros
+
+- **Debian/Ubuntu:** `sudo apt install build-essential cmake libvulkan-dev glslang-tools`
+- **Fedora:** `sudo dnf install cmake gcc-c++ vulkan-loader-devel glslang`
+- **Arch:** `sudo pacman -S cmake base-devel vulkan-headers shaderc`
 
 ## Build & test
 
