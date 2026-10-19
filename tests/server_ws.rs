@@ -92,3 +92,48 @@ async fn server_answers_list_sources_and_bad_start() {
     drop(ws);
     server.abort();
 }
+
+#[tokio::test]
+async fn server_answers_list_models_and_rejects_unknown_model() {
+    // Bind an ephemeral port and run the server in the background.
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    drop(listener);
+
+    let server = tokio::spawn(audio::server::serve(addr));
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    let mut ws = connect(addr).await;
+
+    // 1. list_models returns a `models` payload with the catalog (3 entries).
+    send(&mut ws, &ClientMessage::ListModels).await;
+    match next(&mut ws).await {
+        ServerMessage::Models { models } => {
+            assert_eq!(models.len(), 3);
+            let ids: Vec<&str> = models.iter().map(|m| m.entry.id.as_str()).collect();
+            assert!(ids.contains(&"parakeet-unified-en-0.6b"));
+            assert!(ids.contains(&"nemotron-3.5-asr-streaming-0.6b"));
+            assert!(ids.contains(&"voxtral-mini-4b-realtime"));
+        }
+        other => panic!("expected models, got {other:?}"),
+    }
+
+    // 2. Deleting a non-existent model is a no-op: the server responds with a
+    //    fresh `models` catalog (delete of a missing dir is not an error).
+    send(
+        &mut ws,
+        &ClientMessage::DeleteModel {
+            id: "no-such-model".to_string(),
+        },
+    )
+    .await;
+    match next(&mut ws).await {
+        ServerMessage::Models { models } => {
+            assert_eq!(models.len(), 3);
+        }
+        other => panic!("expected models after delete, got {other:?}"),
+    }
+
+    drop(ws);
+    server.abort();
+}

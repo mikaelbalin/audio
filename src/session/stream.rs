@@ -77,7 +77,11 @@ pub fn run(
                 }
                 ServerMessage::Stopped
                 | ServerMessage::Delta { .. }
-                | ServerMessage::Sources { .. } => {}
+                | ServerMessage::Sources { .. }
+                | ServerMessage::Models { .. }
+                | ServerMessage::ModelProgress { .. }
+                | ServerMessage::ModelDone { .. }
+                | ServerMessage::ModelError { .. } => {}
             }
             if matches!(event, ServerMessage::Stopped) {
                 stop_for_events.store(true, Ordering::SeqCst);

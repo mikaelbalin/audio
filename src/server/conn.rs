@@ -86,6 +86,9 @@ fn handle_command(
         ClientMessage::Stop => stop_session(session, tx),
         ClientMessage::Pause => set_paused(session, true),
         ClientMessage::Resume => set_paused(session, false),
+        ClientMessage::ListModels => list_models(tx),
+        ClientMessage::DownloadModel { id } => download_model(tx, id),
+        ClientMessage::DeleteModel { id } => delete_model(tx, id),
     }
 }
 
@@ -126,6 +129,69 @@ fn stop_session(session: &Arc<Mutex<Option<Session>>>, tx: &mpsc::Sender<ServerM
     if session.lock().unwrap().take().is_some() {
         send(tx, ServerMessage::Stopped);
     }
+}
+
+/// Sends the full catalog with download status.
+fn list_models(tx: &mpsc::Sender<ServerMessage>) {
+    let models = crate::model_store::all_statuses();
+    send(tx, ServerMessage::Models { models });
+}
+
+/// Starts downloading a model on a blocking thread; streams progress events,
+/// then `ModelDone`/`ModelError`, and finally a fresh catalog.
+fn download_model(tx: &mpsc::Sender<ServerMessage>, id: String) {
+    let entry = match crate::model_store::find(&id) {
+        Some(e) => e,
+        None => {
+            send(
+                tx,
+                ServerMessage::ModelError {
+                    id,
+                    message: "unknown model".to_string(),
+                },
+            );
+            return;
+        }
+    };
+    let model_id = entry.id.clone();
+    let tx_progress = tx.clone();
+
+    // Run the blocking download off the async executor's worker threads.
+    tokio::task::spawn_blocking(move || {
+        let tx_progress_inner = tx_progress.clone();
+        let progress_id = model_id.clone();
+        let result = crate::model_store::download_model(&entry, move |p| {
+            let _ = tx_progress_inner.try_send(ServerMessage::ModelProgress {
+                id: progress_id.clone(),
+                received: p.received,
+                total: p.total,
+            });
+        });
+        match result {
+            Ok(()) => {
+                let _ = tx_progress.try_send(ServerMessage::ModelDone { id: model_id });
+            }
+            Err(message) => {
+                let _ = tx_progress.try_send(ServerMessage::ModelError {
+                    id: model_id,
+                    message,
+                });
+            }
+        }
+        // Refresh the catalog for any listeners.
+        let models = crate::model_store::all_statuses();
+        let _ = tx_progress.try_send(ServerMessage::Models { models });
+    });
+}
+
+/// Deletes a model and reports the fresh catalog (or an error).
+fn delete_model(tx: &mpsc::Sender<ServerMessage>, id: String) {
+    if let Err(message) = crate::model_store::delete_model(&id) {
+        send(tx, ServerMessage::ModelError { id, message });
+        return;
+    }
+    let models = crate::model_store::all_statuses();
+    send(tx, ServerMessage::Models { models });
 }
 
 /// Best-effort enqueue of an outbound event.

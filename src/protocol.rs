@@ -2,6 +2,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::model_store::ModelStatus;
+
 /// A chunk of raw PCM audio. `pcm_s16le`, mono, 16 kHz.
 pub type AudioChunk = Vec<u8>;
 
@@ -115,6 +117,12 @@ pub enum ClientMessage {
     Resume,
     /// Request the list of available capture sources.
     ListSources,
+    /// Request the catalog of downloadable local models with download status.
+    ListModels,
+    /// Start downloading a local model by catalog id.
+    DownloadModel { id: String },
+    /// Delete a downloaded local model by catalog id.
+    DeleteModel { id: String },
 }
 
 /// Events emitted from a running session back to the frontend.
@@ -136,6 +144,18 @@ pub enum ServerMessage {
     Sources { sources: Vec<AudioSource> },
     /// The session was stopped.
     Stopped,
+    /// Sent in response to `ClientMessage::ListModels` (and after delete).
+    Models { models: Vec<ModelStatus> },
+    /// Download progress for a model, sent as bytes arrive.
+    ModelProgress {
+        id: String,
+        received: u64,
+        total: u64,
+    },
+    /// A model download finished successfully.
+    ModelDone { id: String },
+    /// A model download or delete failed.
+    ModelError { id: String, message: String },
 }
 
 #[cfg(test)]
