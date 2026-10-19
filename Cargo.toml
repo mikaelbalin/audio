@@ -10,7 +10,10 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
 tokio-tungstenite = { version = "0.24", features = ["rustls-tls-native-roots"] }
-sherpa-onnx = "1.13.8"
+# Local ASR runs GGUF models on the ggml runtime via transcribe-cpp.
+# `default-features = false` disables the Metal default so the build is portable
+# (CPU-only); GPU backends can be opted in per-platform later.
+transcribe-cpp = { version = "0.4.0", default-features = false }
 rustls = { version = "0.23", features = ["ring"] }
 futures-util = { version = "0.3", features = ["sink", "std"] }
 directories = "6"

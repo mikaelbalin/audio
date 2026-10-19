@@ -63,7 +63,7 @@ impl Default for MistralConfig {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct LocalConfig {
-    /// Catalog id of the model to run (e.g. "parakeet-tdt-v3").
+    /// Catalog id of the model to run (e.g. "nemotron-3.5-asr-streaming-0.6b").
     pub model_id: String,
     /// Language hint (e.g. "ru" or "en"); an empty string means auto-detect.
     pub language: String,

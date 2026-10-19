@@ -55,7 +55,7 @@ mod tests {
 
     #[test]
     fn model_dir_is_a_subdirectory_of_models_dir() {
-        let dir = model_dir("parakeet-tdt-v3");
-        assert!(dir.ends_with("parakeet-tdt-v3"));
+        let dir = model_dir("nemotron-3.5-asr-streaming-0.6b");
+        assert!(dir.ends_with("nemotron-3.5-asr-streaming-0.6b"));
     }
 }

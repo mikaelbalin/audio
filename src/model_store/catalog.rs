@@ -74,87 +74,67 @@ pub fn file_url(entry: &ModelEntry, file: &ModelFile) -> String {
     )
 }
 
-/// The local Parakeet TDT 0.6B v3 (int8) model — 25 European languages
-/// including Russian and English, with automatic language detection.
-fn parakeet_tdt_v3() -> ModelEntry {
+/// Parakeet Unified EN 0.6B — unified offline+streaming RNNT, English only,
+/// native punctuation & capitalization (Q8_0 GGUF).
+fn parakeet_unified_en() -> ModelEntry {
     ModelEntry {
-        id: "parakeet-tdt-v3".to_string(),
-        name: "Parakeet TDT 0.6B v3".to_string(),
-        repo: "csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8".to_string(),
-        revision: "2bda32ec70b097a55adaa07d9a7173915b43cc78".to_string(),
-        files: vec![
-            ModelFile {
-                name: "encoder.int8.onnx".to_string(),
-                size: 652184281,
-                sha256: Some(
-                    "acfc2b4456377e15d04f0243af540b7fe7c992f8d898d751cf134c3a55fd2247".to_string(),
-                ),
-            },
-            ModelFile {
-                name: "decoder.int8.onnx".to_string(),
-                size: 11845275,
-                sha256: Some(
-                    "179e50c43d1a9de79c8a24149a2f9bac6eb5981823f2a2ed88d655b24248db4e".to_string(),
-                ),
-            },
-            ModelFile {
-                name: "joiner.int8.onnx".to_string(),
-                size: 6355277,
-                sha256: Some(
-                    "3164c13fc2821009440d20fcb5fdc78bff28b4db2f8d0f0b329101719c0948b3".to_string(),
-                ),
-            },
-            ModelFile {
-                name: "tokens.txt".to_string(),
-                size: 93939,
-                sha256: None,
-            },
-        ],
+        id: "parakeet-unified-en-0.6b".to_string(),
+        name: "Parakeet Unified EN 0.6B".to_string(),
+        repo: "handy-computer/parakeet-unified-en-0.6b-gguf".to_string(),
+        revision: "7e948f21b7bdbac698d3318db9d350f1096f3b6c".to_string(),
+        files: vec![ModelFile {
+            name: "parakeet-unified-en-0.6b-Q8_0.gguf".to_string(),
+            size: 731357568,
+            sha256: Some(
+                "4b50b6dd862bf6e346929aaf4f5eaacec003bfa3f56462d6c874b41ef2f38795".to_string(),
+            ),
+        }],
     }
 }
 
-/// The local Nemotron 3.5 ASR Streaming 0.6B (int8) model — 40 languages
-/// including Russian and English, cache-aware streaming (~0.56s latency).
+/// Nemotron 3.5 ASR Streaming 0.6B — cache-aware streaming, 28 languages
+/// including Russian, native punctuation & capitalization (Q8_0 GGUF).
 fn nemotron_3_5_asr_streaming() -> ModelEntry {
     ModelEntry {
-        id: "nemotron-3.5-asr-streaming".to_string(),
-        name: "Nemotron 3.5 ASR Streaming 0.6B".to_string(),
-        repo: "Masterx/sherpa-onnx-nemotron-3.5-asr-streaming-0.6b-560ms-2026-06-11".to_string(),
-        revision: "3f1f6020667b151d0b6820cc4b8ae4f42b6d35fc".to_string(),
-        files: vec![
-            ModelFile {
-                name: "encoder.int8.onnx".to_string(),
-                size: 657601403,
-                sha256: Some(
-                    "874275f509c86e331eb1c1f1e2f7fa48c39144de94f98ccbe6ae3fcdc18df38a".to_string(),
-                ),
-            },
-            ModelFile {
-                name: "decoder.int8.onnx".to_string(),
-                size: 14978075,
-                sha256: Some(
-                    "19f9c98fc6d0a2c33a65a43b36fdb2e914c26c0aa9764be3aebc502a1e982fb0".to_string(),
-                ),
-            },
-            ModelFile {
-                name: "joiner.int8.onnx".to_string(),
-                size: 9504438,
-                sha256: Some(
-                    "4101c7c679a0bc30483794b27a059e34e79232aa2068d78d51231a22c8b0d7ce".to_string(),
-                ),
-            },
-            ModelFile {
-                name: "tokens.txt".to_string(),
-                size: 144528,
-                sha256: None,
-            },
-        ],
+        id: "nemotron-3.5-asr-streaming-0.6b".to_string(),
+        name: "Nemotron Streaming 3.5".to_string(),
+        repo: "handy-computer/nemotron-3.5-asr-streaming-0.6b-gguf".to_string(),
+        revision: "6d44e540bc31b0de1dbe174a3cea87f53a7f22fb".to_string(),
+        files: vec![ModelFile {
+            name: "nemotron-3.5-asr-streaming-0.6b-Q8_0.gguf".to_string(),
+            size: 751094240,
+            sha256: Some(
+                "b94545b313b3223fda7b2857a52681da813935c2127643d1e9ff0c23d988089c".to_string(),
+            ),
+        }],
+    }
+}
+
+/// Voxtral Mini 4B Realtime — causal audio encoder + LLM, 13 languages
+/// including Russian, native streaming with punctuation (Q5_K_M GGUF).
+fn voxtral_mini_4b_realtime() -> ModelEntry {
+    ModelEntry {
+        id: "voxtral-mini-4b-realtime".to_string(),
+        name: "Voxtral Mini 4B Realtime".to_string(),
+        repo: "handy-computer/Voxtral-Mini-4B-Realtime-2602-gguf".to_string(),
+        revision: "b3e1c979e3775cbd0a49a65878a0ec7f06789ed7".to_string(),
+        files: vec![ModelFile {
+            name: "Voxtral-Mini-4B-Realtime-2602-Q5_K_M.gguf".to_string(),
+            size: 3281439008,
+            sha256: Some(
+                "e20a7582c5cf8159454c909b7f57b184b287cb3d7c3ec85744727a2cec51b08f".to_string(),
+            ),
+        }],
     }
 }
 
 /// All models currently offered for download.
 pub fn all_models() -> Vec<ModelEntry> {
-    vec![parakeet_tdt_v3(), nemotron_3_5_asr_streaming()]
+    vec![
+        parakeet_unified_en(),
+        nemotron_3_5_asr_streaming(),
+        voxtral_mini_4b_realtime(),
+    ]
 }
 
 /// Looks up a model by id.
@@ -172,32 +152,28 @@ mod tests {
     use super::*;
 
     #[test]
-    fn catalog_contains_parakeet_with_four_files() {
-        let entry = find("parakeet-tdt-v3").expect("parakeet must be present");
-        assert_eq!(entry.files.len(), 4);
-        assert_eq!(
-            entry
-                .files
-                .iter()
-                .map(|f| f.name.clone())
-                .collect::<Vec<_>>(),
-            vec![
-                "encoder.int8.onnx",
-                "decoder.int8.onnx",
-                "joiner.int8.onnx",
-                "tokens.txt",
-            ]
-        );
+    fn catalog_contains_three_streaming_gguf_models() {
+        let models = all_models();
+        assert_eq!(models.len(), 3);
+        let ids: Vec<&str> = models.iter().map(|m| m.id.as_str()).collect();
+        assert!(ids.contains(&"parakeet-unified-en-0.6b"));
+        assert!(ids.contains(&"nemotron-3.5-asr-streaming-0.6b"));
+        assert!(ids.contains(&"voxtral-mini-4b-realtime"));
+        // Every model is a single GGUF file.
+        for m in &models {
+            assert_eq!(m.files.len(), 1);
+            assert!(m.files[0].name.ends_with(".gguf"));
+        }
     }
 
     #[test]
     fn file_url_uses_pinned_revision() {
-        let entry = find("parakeet-tdt-v3").unwrap();
+        let entry = find("nemotron-3.5-asr-streaming-0.6b").unwrap();
         let url = file_url(&entry, &entry.files[0]);
         assert_eq!(
             url,
             format!(
-                "https://huggingface.co/{}/resolve/{}/encoder.int8.onnx",
+                "https://huggingface.co/{}/resolve/{}/nemotron-3.5-asr-streaming-0.6b-Q8_0.gguf",
                 entry.repo, entry.revision
             )
         );
@@ -205,7 +181,7 @@ mod tests {
 
     #[test]
     fn total_size_is_sum_of_files() {
-        let entry = find("parakeet-tdt-v3").unwrap();
+        let entry = find("parakeet-unified-en-0.6b").unwrap();
         let sum: u64 = entry.files.iter().map(|f| f.size).sum();
         assert_eq!(entry.total_size(), sum);
     }
