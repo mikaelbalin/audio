@@ -38,6 +38,41 @@ impl Default for LocalProvider {
     }
 }
 
+/// Process-wide cache of loaded models, holding at most one model (the most
+/// recently used). A GGUF with a GPU backend allocates significant device
+/// memory, and the ggml Vulkan backend doesn't always release that memory
+/// cleanly on `free`; re-loading a model for every session rapidly exhausts
+/// GPU memory. Caching the single most-recent model avoids re-allocation during
+/// repeated sessions while still freeing memory when the user switches models.
+static MODEL_CACHE: std::sync::OnceLock<std::sync::Mutex<Option<(String, Model)>>> =
+    std::sync::OnceLock::new();
+
+fn model_cache() -> &'static std::sync::Mutex<Option<(String, Model)>> {
+    MODEL_CACHE.get_or_init(|| std::sync::Mutex::new(None))
+}
+
+/// Returns a cached `Model` for `model_id`, loading it on first use. Keeps at
+/// most one model cached (LRU size 1): switching to a different model evicts the
+/// previous one, freeing its device memory.
+fn cached_model(model_id: &str) -> Result<Model, String> {
+    let path = resolve_model_file(model_id)?;
+    let key = path.to_string_lossy().to_string();
+
+    let mut cache = model_cache().lock().unwrap();
+    if let Some((k, model)) = cache.as_ref() {
+        if k == &key {
+            return Ok(model.clone());
+        }
+    }
+
+    let model = Model::load(&path)
+        .map_err(|e| format!("local provider: failed to load '{}': {e}", path.display()))?;
+    // Evict the previous model (if any) by replacing the single cache slot.
+    // The old model is dropped here, releasing its device memory.
+    *cache = Some((key, model.clone()));
+    Ok(model)
+}
+
 /// Converts `pcm_s16le` bytes (little-endian 16-bit PCM) into normalized `f32`
 /// samples, the format transcribe-cpp consumes. Mono 16 kHz is assumed.
 fn s16le_to_f32(bytes: &[u8]) -> Vec<f32> {
@@ -80,18 +115,13 @@ impl TranscriptionProvider for LocalProvider {
             return Err("local provider: model_id is empty".to_string());
         }
 
-        let model_path = resolve_model_file(model_id)?;
         let language = self.config.language.clone();
 
-        // Load the model up front (before spawning the worker) so a missing or
-        // corrupt file fails the `start` call synchronously rather than inside
-        // the worker thread.
-        let model = Model::load(&model_path).map_err(|e| {
-            format!(
-                "local provider: failed to load '{}': {e}",
-                model_path.display()
-            )
-        })?;
+        // Load (or reuse) the model up front so a missing/corrupt file fails the
+        // `start` call synchronously. The model is cached process-wide so GPU
+        // memory isn't re-allocated on every session (the ggml Vulkan backend
+        // doesn't always release device memory cleanly on free).
+        let model = cached_model(model_id)?;
         let mut session = model
             .session()
             .map_err(|e| format!("local provider: failed to open session: {e}"))?;

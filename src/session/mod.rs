@@ -50,6 +50,17 @@ impl Session {
             let _ = h.join();
         }
     }
+
+    /// Requests graceful shutdown **without** waiting for the worker thread.
+    ///
+    /// Returns the worker's [`JoinHandle`] so the caller can join it later (e.g.
+    /// before starting a new session). The handle is taken out of the session,
+    /// so dropping the returned handle detaches the worker thread.
+    pub fn stop_async(mut self) -> Option<std::thread::JoinHandle<()>> {
+        self.stop_flag
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        self.handle.take()
+    }
 }
 
 impl Drop for Session {
