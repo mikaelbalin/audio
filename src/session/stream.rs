@@ -42,7 +42,6 @@ pub fn run(
 
     let on_level = options.on_level.clone();
     let stop_for_source = Arc::clone(stop_flag);
-    let mut chunk_count: usize = 0;
 
     // The chunk source is either the local capture (`parec`) or an external
     // stream of chunks pushed by the client (browser Web Audio capture).
@@ -57,13 +56,6 @@ pub fn run(
                 // Block until a chunk arrives or the sender is dropped.
                 match rx.recv() {
                     Ok(chunk) => {
-                        chunk_count += 1;
-                        if chunk_count == 1 || chunk_count.is_multiple_of(200) {
-                            eprintln!(
-                                "[audio:stream] received chunk #{chunk_count} len={}",
-                                chunk.len()
-                            );
-                        }
                         if let Some(level) = &on_level {
                             level(super::level::rms_level(&chunk));
                         }
@@ -81,13 +73,6 @@ pub fn run(
                     return None;
                 }
                 let chunk = stream.next_chunk()?;
-                chunk_count += 1;
-                if chunk_count == 1 || chunk_count.is_multiple_of(200) {
-                    eprintln!(
-                        "[audio:stream] captured chunk #{chunk_count} len={}",
-                        chunk.len()
-                    );
-                }
                 if let Some(level) = &on_level {
                     level(super::level::rms_level(&chunk));
                 }
@@ -101,15 +86,13 @@ pub fn run(
     let session = provider.stream(
         chunk_source,
         Box::new(move |event| {
-            // Only log lifecycle events; `Delta` fires hundreds of times per
-            // second and would flood the log.
             match event {
-                ServerMessage::Ready => eprintln!("[audio:stream] provider ready"),
-                ServerMessage::Done => eprintln!("[audio:stream] provider done"),
                 ServerMessage::Error { message } => {
                     eprintln!("[audio:stream] provider error: {message}")
                 }
-                ServerMessage::Stopped
+                ServerMessage::Ready
+                | ServerMessage::Done
+                | ServerMessage::Stopped
                 | ServerMessage::Delta { .. }
                 | ServerMessage::Sources { .. }
                 | ServerMessage::Models { .. }
@@ -127,7 +110,6 @@ pub fn run(
 
     // Tell the UI we are live.
     (options.on_event)(&ServerMessage::Ready);
-    eprintln!("[audio:stream] Ready (source={})", options.source_id);
 
     // Keep the session alive until a stop is requested. The provider runs on
     // its own thread; holding the guard prevents premature shutdown.
