@@ -25,7 +25,7 @@ Models are hosted under [`handy-computer`](https://huggingface.co/handy-computer
 
 ## Prerequisites
 
-Building this crate compiles the native `transcribe.cpp` C++ core (ggml) from source, which requires a C++ toolchain, **CMake**, and (for GPU acceleration) the **Vulkan SDK**. The build enables the Vulkan backend by default (AMD / NVIDIA / Intel GPUs on Linux).
+Building this crate compiles the native `transcribe.cpp` C++ core (ggml) from source, which requires a C++ toolchain and **CMake**. For GPU acceleration, the **Vulkan SDK** is also required — the Vulkan backend is enabled by default via the `vulkan` feature (AMD / NVIDIA / Intel GPUs on Linux). To build **without** Vulkan (CPU-only, e.g. in CI or where the Vulkan SDK is not installed), use `--no-default-features`.
 
 ### Fedora / Bazzite
 
@@ -54,6 +54,10 @@ brew install cmake shaderc vulkan-headers vulkan-loader
 cargo check --lib              # type-check the library
 cargo test --lib               # unit tests
 cargo build --features server  # build the WebSocket server binary
+
+# CPU-only build (no Vulkan SDK required):
+cargo build --no-default-features
+cargo test  --no-default-features
 ```
 
 ## Usage

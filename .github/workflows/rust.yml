@@ -16,7 +16,20 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+
+    # Cache the Cargo build artifacts and registry between runs.
+    - uses: Swatinem/rust-cache@v2
+
+    # The `transcribe-cpp` dependency (feature "vulkan") builds the ggml C++
+    # core with CMake and requires the Vulkan SDK (headers + loader + glslc).
+    # We don't need GPU acceleration to verify the project compiles and tests
+    # pass, so we build with --no-default-features to skip the Vulkan backend.
+    # The C++ toolchain and CMake are still needed for the ggml CPU build.
+    - name: Install build dependencies
+      run: sudo apt-get update && sudo apt-get install -y build-essential cmake
+
     - name: Build
-      run: cargo build --verbose
+      run: cargo build --no-default-features --verbose
+
     - name: Run tests
-      run: cargo test --verbose
+      run: cargo test --no-default-features --verbose

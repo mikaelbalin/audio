@@ -14,7 +14,7 @@ tokio-tungstenite = { version = "0.24", features = ["rustls-tls-native-roots"] }
 # Vulkan provides GPU acceleration (AMD/NVIDIA/Intel on Linux); `metal` is
 # the macOS default and is disabled so the build is portable. Enabling Vulkan
 # requires the Vulkan SDK (glslc, vulkan-headers) at build time.
-transcribe-cpp = { version = "0.4.0", default-features = false, features = ["vulkan"] }
+transcribe-cpp = { version = "0.4.0", default-features = false }
 rustls = { version = "0.23", features = ["ring"] }
 futures-util = { version = "0.3", features = ["sink", "std"] }
 directories = "6"
@@ -22,6 +22,12 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 sha2 = "0.10"
 
 [features]
+default = ["vulkan"]
+# Vulkan GPU acceleration for the ggml runtime. Enabled by default so local
+# builds get GPU support, but requires the Vulkan SDK (glslc, vulkan-headers,
+# loader) at build time. Disable it (e.g. in CI with --no-default-features)
+# when the Vulkan toolchain is not available and CPU-only is acceptable.
+vulkan = ["transcribe-cpp/vulkan"]
 # WebSocket server binary (`--features server`). Library consumers (Tauri
 # apps) leave this off and don't need server-only tokio I/O features.
 server = ["tokio/net", "tokio/sync"]
