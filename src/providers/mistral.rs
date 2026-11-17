@@ -12,6 +12,7 @@ use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
 use crate::protocol::{AudioChunk, MistralConfig, ServerMessage};
 
 use std::sync::Arc;
+use base64::Engine;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use super::{SessionGuard, TranscriptionProvider};
@@ -134,6 +135,23 @@ async fn run(
     eprintln!("[audio:mistral] connected");
 
     let mut writer = session.writer;
+
+    // Configure the session: tell Mistral the audio format we're sending.
+    // Default is pcm_s16le at 16000 Hz, which matches our capture pipeline.
+    let update = serde_json::json!({
+        "type": "session.update",
+        "session": {
+            "audio_format": {
+                "encoding": "pcm_s16le",
+                "sample_rate": cfg.sample_rate,
+            },
+        },
+    });
+    writer
+        .send(Message::Text(update.to_string()))
+        .await
+        .map_err(|e| format!("Failed to send session.update: {e}"))?;
+    eprintln!("[audio:mistral] session.update sent");
     let mut reader = session.reader;
 
     // The event callback must be shared between the spawned reader task and
@@ -176,13 +194,26 @@ async fn run(
         }
         sent += 1;
         if sent <= 3 || sent % 100 == 0 {
-            eprintln!("[audio:mistral] sending chunk #{sent} size={}", chunk.len());
+            let rms = crate::session::rms_level(&chunk);
+            eprintln!("[audio:mistral] sending chunk #{sent} size={} rms={rms:.3}", chunk.len());
         }
+        // Mistral realtime expects JSON text messages with base64-encoded audio,
+        // NOT raw binary WebSocket frames. Each chunk is wrapped in an
+        //  event.
+        let b64 = base64_encode(&chunk);
+        let msg = serde_json::json!({
+            "type": "input_audio.append",
+            "audio": b64,
+        });
         writer
-            .send(Message::Binary(chunk.to_vec()))
+            .send(Message::Text(msg.to_string()))
             .await
             .map_err(|e| format!("Failed to send audio: {e}"))?;
     }
+    // Signal end of audio so Mistral finalizes the transcript.
+    let end = serde_json::json!({ "type": "input_audio.end" });
+    let _ = writer.send(Message::Text(end.to_string())).await;
+
     writer
         .close()
         .await
@@ -197,6 +228,11 @@ async fn run(
 }
 
 /// Parses one JSON event from the realtime stream into a [`ServerMessage`].
+/// Base64-encode a PCM chunk for the Mistral `input_audio.append` JSON event.
+fn base64_encode(data: &[u8]) -> String {
+    base64::engine::general_purpose::STANDARD.encode(data)
+}
+
 fn parse_event(bytes: &[u8]) -> Option<ServerMessage> {
     let text = std::str::from_utf8(bytes).ok()?;
     let v: serde_json::Value = serde_json::from_str(text).ok()?;
