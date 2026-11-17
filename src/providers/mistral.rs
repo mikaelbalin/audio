@@ -120,7 +120,9 @@ async fn run(
     stop: &AtomicBool,
     paused: &Arc<AtomicBool>,
 ) -> Result<(), String> {
+    eprintln!("[audio:mistral] connecting to {} model={}", cfg.base_url, cfg.model);
     let session = MistralSession::connect(cfg).await?;
+    eprintln!("[audio:mistral] connected");
 
     let mut writer = session.writer;
     let mut reader = session.reader;
@@ -135,6 +137,7 @@ async fn run(
         loop {
             match reader.next().await {
                 Some(Ok(Message::Text(t))) => {
+                    eprintln!("[audio:mistral] recv: {}", &t[..t.len().min(200)]);
                     if let Some(ev) = parse_event(t.as_bytes()) {
                         on_event_reader.lock().unwrap()(&ev);
                     }
@@ -156,10 +159,15 @@ async fn run(
     // the muted speech is never buffered or sent; only the socket send is
     // skipped, so resume is instant with no backlog replay.
     let mut chunks = chunks;
+    let mut sent: u64 = 0;
     while !stop.load(Ordering::SeqCst) {
         let Some(chunk) = chunks() else { break };
         if paused.load(Ordering::SeqCst) {
             continue; // drained, not sent
+        }
+        sent += 1;
+        if sent <= 3 || sent % 100 == 0 {
+            eprintln!("[audio:mistral] sending chunk #{sent} size={}", chunk.len());
         }
         writer
             .send(Message::Binary(chunk.to_vec()))

@@ -6,7 +6,7 @@
 //! are no intermediate channels or polling sleeps, so latency stays low.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::Receiver;
 
 use crate::capture;
@@ -67,12 +67,20 @@ pub fn run(
         }
         None => {
             // Start capture locally.
+            eprintln!("[audio:stream] starting capture on source={:?}", options.source_id);
             let mut stream = capture::start(&options.source_id, options.sample_rate)?;
+            eprintln!("[audio:stream] capture started");
+            let chunk_counter = Arc::new(AtomicU64::new(0));
             Box::new(move || {
                 if stop_for_source.load(Ordering::SeqCst) {
                     return None;
                 }
                 let chunk = stream.next_chunk()?;
+                chunk_counter.fetch_add(1, Ordering::Relaxed);
+                let n = chunk_counter.load(Ordering::Relaxed);
+                if n <= 3 || n % 100 == 0 {
+                    eprintln!("[audio:stream] chunk #{n} size={}", chunk.len());
+                }
                 if let Some(level) = &on_level {
                     level(super::level::rms_level(&chunk));
                 }
@@ -90,10 +98,12 @@ pub fn run(
                 ServerMessage::Error { message } => {
                     eprintln!("[audio:stream] provider error: {message}")
                 }
+                ServerMessage::Delta { text } => {
+                    eprintln!("[audio:stream] delta: {text}");
+                }
                 ServerMessage::Ready
                 | ServerMessage::Done
                 | ServerMessage::Stopped
-                | ServerMessage::Delta { .. }
                 | ServerMessage::Sources { .. }
                 | ServerMessage::Models { .. }
                 | ServerMessage::ModelProgress { .. }
