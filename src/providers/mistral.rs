@@ -101,7 +101,9 @@ impl TranscriptionProvider for MistralProvider {
             rt.block_on(async move {
                 match run(&cfg, chunks, on_event, &stop_flag_for_session, &paused).await {
                     Ok(()) => {}
-                    Err(_e) => {}
+                    Err(e) => {
+                        eprintln!("[audio:mistral] session error: {e}");
+                    }
                 }
             });
         });
@@ -116,12 +118,19 @@ impl TranscriptionProvider for MistralProvider {
 async fn run(
     cfg: &MistralConfig,
     chunks: Box<dyn FnMut() -> Option<AudioChunk> + Send>,
-    on_event: Box<dyn FnMut(&ServerMessage) + Send>,
+    mut on_event: Box<dyn FnMut(&ServerMessage) + Send>,
     stop: &AtomicBool,
     paused: &Arc<AtomicBool>,
 ) -> Result<(), String> {
     eprintln!("[audio:mistral] connecting to {} model={}", cfg.base_url, cfg.model);
-    let session = MistralSession::connect(cfg).await?;
+    let session = match MistralSession::connect(cfg).await {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("[audio:mistral] connect failed: {e}");
+            on_event(&ServerMessage::Error { message: e.clone() });
+            return Err(e);
+        }
+    };
     eprintln!("[audio:mistral] connected");
 
     let mut writer = session.writer;
