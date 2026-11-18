@@ -11,8 +11,8 @@ use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
 
 use crate::protocol::{AudioChunk, MistralConfig, ServerMessage};
 
-use std::sync::Arc;
 use base64::Engine;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use super::{SessionGuard, TranscriptionProvider};
@@ -100,11 +100,8 @@ impl TranscriptionProvider for MistralProvider {
             };
 
             rt.block_on(async move {
-                match run(&cfg, chunks, on_event, &stop_flag_for_session, &paused).await {
-                    Ok(()) => {}
-                    Err(e) => {
-                        eprintln!("[audio:mistral] session error: {e}");
-                    }
+                if let Err(e) = run(&cfg, chunks, on_event, &stop_flag_for_session, &paused).await {
+                    eprintln!("[audio:mistral] session error: {e}");
                 }
             });
         });
@@ -123,7 +120,6 @@ async fn run(
     stop: &AtomicBool,
     paused: &Arc<AtomicBool>,
 ) -> Result<(), String> {
-    eprintln!("[audio:mistral] connecting to {} model={}", cfg.base_url, cfg.model);
     let session = match MistralSession::connect(cfg).await {
         Ok(s) => s,
         Err(e) => {
@@ -132,7 +128,6 @@ async fn run(
             return Err(e);
         }
     };
-    eprintln!("[audio:mistral] connected");
 
     let mut writer = session.writer;
 
@@ -151,7 +146,6 @@ async fn run(
         .send(Message::Text(update.to_string()))
         .await
         .map_err(|e| format!("Failed to send session.update: {e}"))?;
-    eprintln!("[audio:mistral] session.update sent");
     let mut reader = session.reader;
 
     // The event callback must be shared between the spawned reader task and
@@ -164,7 +158,6 @@ async fn run(
         loop {
             match reader.next().await {
                 Some(Ok(Message::Text(t))) => {
-                    eprintln!("[audio:mistral] recv: {}", &t[..t.len().min(200)]);
                     if let Some(ev) = parse_event(t.as_bytes()) {
                         on_event_reader.lock().unwrap()(&ev);
                     }
@@ -186,16 +179,10 @@ async fn run(
     // the muted speech is never buffered or sent; only the socket send is
     // skipped, so resume is instant with no backlog replay.
     let mut chunks = chunks;
-    let mut sent: u64 = 0;
     while !stop.load(Ordering::SeqCst) {
         let Some(chunk) = chunks() else { break };
         if paused.load(Ordering::SeqCst) {
             continue; // drained, not sent
-        }
-        sent += 1;
-        if sent <= 3 || sent % 100 == 0 {
-            let rms = crate::session::rms_level(&chunk);
-            eprintln!("[audio:mistral] sending chunk #{sent} size={} rms={rms:.3}", chunk.len());
         }
         // Mistral realtime expects JSON text messages with base64-encoded audio,
         // NOT raw binary WebSocket frames. Each chunk is wrapped in an

@@ -19,7 +19,6 @@ pub async fn serve(addr: SocketAddr) -> Result<(), String> {
     let listener = TcpListener::bind(addr)
         .await
         .map_err(|e| format!("failed to bind {addr}: {e}"))?;
-    eprintln!("[audio:server] listening on ws://{addr}");
 
     loop {
         let (tcp, peer) = match listener.accept().await {
@@ -29,7 +28,6 @@ pub async fn serve(addr: SocketAddr) -> Result<(), String> {
                 continue;
             }
         };
-        eprintln!("[audio:server] connection from {peer}");
         tokio::spawn(async move {
             if let Err(e) = conn::handle(tcp).await {
                 eprintln!("[audio:server] connection error ({peer}): {e}");
