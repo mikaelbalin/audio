@@ -1,13 +1,26 @@
-// Adds the Homebrew (Linuxbrew) library directory to the linker search path so
-// `-lvulkan` (emitted by the transcribe-cpp ggml Vulkan backend) resolves at
-// link time. On this machine the Vulkan loader lives under Homebrew, which is
-// not on the linker's default search path.
+// Adds the Vulkan SDK `lib/` directory to the linker search path so `-lvulkan`
+// resolves at link time. The path is derived from `CMAKE_ARGS` (the same env
+// var `transcribe-cpp-sys` forwards to CMake), so a single `CMAKE_ARGS` value
+// covers both CMake's SDK search and the linker.
+//
+// By default we emit nothing and rely on the standard system search paths.
 fn main() {
-    // Re-run if the value is changed via env.
-    println!("cargo:rerun-if-env-changed=HOMEBREW_PREFIX");
+    println!("cargo:rerun-if-env-changed=CMAKE_ARGS");
 
-    let prefix =
-        std::env::var("HOMEBREW_PREFIX").unwrap_or_else(|_| "/home/linuxbrew/.linuxbrew".into());
-    let lib = std::path::Path::new(&prefix).join("lib");
-    println!("cargo:rustc-link-search=native={}", lib.display());
+    if let Ok(args) = std::env::var("CMAKE_ARGS") {
+        if let Some(prefix) = extract_prefix(&args) {
+            let lib = std::path::Path::new(&prefix).join("lib");
+            println!("cargo:rustc-link-search=native={}", lib.display());
+        }
+    }
+}
+
+/// Pulls the path out of `-DCMAKE_PREFIX_PATH=<path>` from a `CMAKE_ARGS` value.
+fn extract_prefix(args: &str) -> Option<&str> {
+    for token in args.split_whitespace() {
+        if let Some(value) = token.strip_prefix("-DCMAKE_PREFIX_PATH=") {
+            return Some(value);
+        }
+    }
+    None
 }
